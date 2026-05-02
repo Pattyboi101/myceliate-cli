@@ -91,8 +91,21 @@ describe('V3 / V4 adapter parity (R1)', () => {
       for (const l of lines) yield enc.encode(l);
     }
     async function* v4Content(): AsyncIterable<Uint8Array> {
+      // Adversarial: include literal `<` (V4 must not treat as tag start) and a
+      // trailing `<|D` partial OPEN_BLOCK (must be flushed at terminal finish).
       const lines = [
         'data: {"choices":[{"delta":{"content":"hello world"}}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"completion_tokens_details":{"reasoning_tokens":0}}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+      for (const l of lines) yield enc.encode(l);
+    }
+    async function* v4ContentAdversarial(): AsyncIterable<Uint8Array> {
+      // V4-only adversarial probe of plain content. V3 has no DSML parser to
+      // confuse, so the V3 vs V4 parity assertion uses the simpler v4Content
+      // above; this fixture exists to additionally verify V4 doesn't false-positive.
+      const lines = [
+        'data: {"choices":[{"delta":{"content":"hello < world"}}]}\n\n',
         'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"completion_tokens_details":{"reasoning_tokens":0}}}\n\n',
         'data: [DONE]\n\n',
       ];
@@ -134,6 +147,25 @@ describe('V3 / V4 adapter parity (R1)', () => {
       .join('');
     expect(v3Text).toBe('hello world');
     expect(v4Text).toBe('hello world');
+
+    // I1 follow-up: V4-only adversarial probe — literal `<` in plain content.
+    // If V4's adapter accidentally treated all content as DSML, this would
+    // false-positive a tool_call or drop bytes. The V3 adapter is unaffected
+    // (no DSML parser), so this is a single-adapter assertion, not parity.
+    const v4Adv = new V4Adapter({
+      apiKey: 'k',
+      baseUrl: 'x',
+      openSse: vi.fn().mockResolvedValue(v4ContentAdversarial()),
+    });
+    const v4AdvEvents = await collect(v4Adv.stream(baseReq));
+    expect(v4AdvEvents.some((e) => e.type === 'tool_call')).toBe(false);
+    const v4AdvText = v4AdvEvents
+      .filter(
+        (e): e is Extract<StreamEvent, { type: 'content_delta' }> => e.type === 'content_delta',
+      )
+      .map((e) => e.text)
+      .join('');
+    expect(v4AdvText).toBe('hello < world');
   });
 
   // ── Adversarial test B: multiple tool calls in one response ──────────────────
@@ -476,5 +508,16 @@ describe('V3 / V4 adapter parity (R1)', () => {
       completionTokens: 0,
       reasoningTokens: 0,
     });
+
+    // I2 follow-up: assert the empty-args invariant — V3 sends `arguments: "{}"`,
+    // V4 sends `<call ...></call>` (no params). Both must produce `args: {}`.
+    const v3Tool = v3Events.find(
+      (e): e is Extract<StreamEvent, { type: 'tool_call' }> => e.type === 'tool_call',
+    );
+    const v4Tool = v4Events.find(
+      (e): e is Extract<StreamEvent, { type: 'tool_call' }> => e.type === 'tool_call',
+    );
+    expect(v3Tool?.args).toEqual({});
+    expect(v4Tool?.args).toEqual({});
   });
 });

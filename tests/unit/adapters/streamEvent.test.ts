@@ -3,6 +3,7 @@ import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
 import {
   isContentDelta,
   isDone,
+  isError,
   isReasoningDelta,
   isToolCall,
 } from '../../../src/adapters/streamEvent.js';
@@ -20,5 +21,6 @@ describe('StreamEvent', () => {
     expect(events.filter(isContentDelta)).toHaveLength(1);
     expect(events.filter(isToolCall)).toHaveLength(1);
     expect(events.filter(isDone)).toHaveLength(1);
+    expect(events.filter(isError)).toHaveLength(1);
   });
 });

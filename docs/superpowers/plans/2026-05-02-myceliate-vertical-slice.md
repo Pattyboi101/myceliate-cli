@@ -156,7 +156,7 @@ The shared substrate every adapter consumes. Locked down first so V3 and V4 adap
 // tests/unit/adapters/streamEvent.test.ts
 import { describe, it, expect } from 'vitest';
 import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
-import { isToolCall, isContentDelta, isReasoningDelta, isDone } from '../../../src/adapters/streamEvent.js';
+import { isToolCall, isContentDelta, isReasoningDelta, isDone, isError } from '../../../src/adapters/streamEvent.js';
 
 describe('StreamEvent', () => {
   it('discriminates reasoning_delta, content_delta, tool_call, done, error', () => {
@@ -171,6 +171,7 @@ describe('StreamEvent', () => {
     expect(events.filter(isContentDelta)).toHaveLength(1);
     expect(events.filter(isToolCall)).toHaveLength(1);
     expect(events.filter(isDone)).toHaveLength(1);
+    expect(events.filter(isError)).toHaveLength(1);
   });
 });
 ```

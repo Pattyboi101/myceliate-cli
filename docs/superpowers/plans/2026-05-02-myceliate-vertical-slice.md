@@ -2555,6 +2555,35 @@ git commit -m "test(queue): integration round-trip with real Redis"
 
 ---
 
+> **Phase 5 review-iteration note:** During Phase 5 execution, code review surfaced fixes applied beyond Tasks 14–18 specs (commit `68f7f2b`):
+>
+> - **Important: `bashJob.ts` missing `child.on('error')` handler.** Spawn-time failures (invalid `cwd`, ENOENT, EACCES) emit `error` on the `ChildProcess`; without a listener Node's EventEmitter throws synchronously, surfacing as an `uncaughtException` that would crash the worker process. The Promise then never resolves and BullMQ re-queues the job, compounding the damage. Handler now resolves with `exitCode: null` and surfaces the error in `stderr`, consistent with the existing failure-mode contract.
+> - **Important: `worker.ts` non-idempotent shutdown.** SIGINT + SIGTERM both call `shutdown`; a second call on already-closing connections propagated as an unhandled rejection. Three serial awaits would also leak the QueueEvents subscription and the Redis singleton if `worker.close()` rejected. Now: `shuttingDown` guard flag + try/catch per await so all three close paths run regardless.
+> - **`connection.ts` `closeRedis` defensive `quit()` wrap.** Redis restart mid-shutdown no longer unhandle-rejects; the close is now silently idempotent.
+> - **Integration test `queue.close()` wrapped in try/finally** so the ioredis client doesn't leak when an assertion fails between `queue.add` and `queue.close`.
+> - **Test added:** invalid-cwd spawn failure (`bashJob.test.ts`). Locks in the Important fix above; without the error handler this test would crash the worker.
+>
+> **Pre-flagged inline fixes during implementation** (commits `c46f1aa`–`c731663` plus `a146cbf` docs):
+>
+> - ioredis v5 import shape: `import { Redis }` (named) instead of plan's `import IORedis` (default — removed in v5).
+> - `package.json` `test:integration` script: positional `tests/integration` path (the `--dir` form was silently no-op'd by vitest config's `include` glob).
+> - `bashJob.ts` null-stream guard for `child.stdout`/`child.stderr` (defensive against `noUncheckedIndexedAccess`; never trips at runtime with `stdio: ['ignore', 'pipe', 'pipe']`).
+> - Worker / QueueEvents shared Redis connection — known BullMQ anti-pattern, deferred to v2 in `CLAUDE.md` "Deferred to v2" list.
+>
+> Tests: 101 → 119 unit + 2 integration. Reviewer's race-condition verdict on `bashJob.ts` stream capture: timer/close/data interactions are safe; the missing error handler was the only material lifecycle gap. Exponential backoff (`attempts: 3, type: 'exponential', delay: 2000`) verified correct and per-job overridable. Treat the code under `src/queue/` and tests under `tests/{unit,integration}/queue/` as the source of truth.
+>
+> **Phase 5 review follow-ups deferred to v2:**
+>
+> - `bashJob.ts`: SIGTERM-before-SIGKILL grace period for gentler interactive cancel (current is SIGKILL-immediate).
+> - `bashJob.ts`: UTF-8 multi-byte boundary truncation in `cap()` produces replacement chars at the cap boundary; `TextDecoder({ stream: true })` would fix.
+> - `bashJob.ts`: `maxBytes` cap is per-stream (stdout + stderr each up to 1 MiB); a combined cap would be more predictable for context-budget accounting.
+> - `worker.ts`: `process.exit(0)` on shutdown masks fatal-error-driven shutdowns; should propagate non-zero on error path.
+> - `connection.ts`: `getRedis()` singleton-identity unit test missing (currently only exercised via integration test).
+> - `queues.ts`: `bashQueue()` factory creates a new Queue per call (callers must `queue.close()`); a singleton-style `getBashQueue()` could simplify orchestrator code in Phase 9.
+> - Worker / QueueEvents dual Redis connection split (already in `CLAUDE.md` deferred list).
+
+---
+
 ## Phase 6 — Memory Layer (OpenClaw pattern)
 
 File-backed Markdown persistence under `.myceliate/`. No DB.

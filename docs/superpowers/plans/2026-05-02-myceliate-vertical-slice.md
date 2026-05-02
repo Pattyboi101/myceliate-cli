@@ -2052,6 +2052,27 @@ git commit -m "feat(tools): in-process readFile/writeFile/listDir/grep"
 
 ---
 
+> **Phase 4 review-iteration note:** During Phase 4 execution, code review surfaced fixes applied beyond Tasks 11–13 specs (commit `c04efed`):
+>
+> - **Symlink-loop guard in `grep.ts walk()`.** Switched `stat()` → `lstat()` and added an explicit `isSymbolicLink()` skip. `stat()` resolves symlinks before `isDirectory()` returns, so a circular link (e.g. `~/Desktop/parent` → `~/.`) would loop the BFS until OOM. Sandboxing / traversal policy lives at the security gateway (R11); skipping symlinks here is the conservative behaviour pre-gateway.
+> - **`writeFile.ts` accurate byte count.** Returns `Buffer.byteLength(content, 'utf8')` instead of `content.length` so the "wrote N bytes" string is correct for multi-byte UTF-8 content.
+> - **Test contract strengthening.** Coerce-input contract test confirms registry's `run()` receives the Zod-parsed value (e.g. `42`) rather than raw input (`'42'`); `listDir` assertion tightened to direct equality (the prior `out.split('\n').sort()` re-sort in the test would have masked a regression in the implementation's sort); malformed-regex test (`SyntaxError` propagates through `invoke()` unwrapped); symlink-skip test that locks in the grep fix above (circular `tmp/cyclic/parent_link → tmp`, expects exactly 3 matches, would otherwise hang).
+> - **Generation-time test additions during implementation** (commits `12dd5a3`, `a9fb46b`, `6ed5cd4`): schema (+4 covering number, boolean, unsupported Zod types like `z.union` and `z.tuple`), registry (+5: duplicate-registration rejection, unknown-tool error, result passthrough, empty-capability return, definition count), lightweight tools (+4: parent-dir creation on writeFile, empty-dir on listDir, no-match grep, subdirectory recursion).
+>
+> Test count: 75 → 101 across the phase (98 after implementer commits, 101 after review fixes). Treat the code under `src/tools/` and tests under `tests/unit/tools/` as the source of truth.
+>
+> **Phase 4 review follow-ups deferred to v2:**
+>
+> - `grep.ts` perf: BFS via `queue.shift()` is O(n) per dequeue; replace with a proper queue or DFS for large directory trees.
+> - `grep.ts` correctness: no binary-file detection; reading `.png` / `.sqlite` / compiled objects as UTF-8 produces mojibake. Add an extension allowlist or a null-byte heuristic.
+> - `grep.ts` memory: full-file read into memory before `\n` split; streaming readline (`node:readline`) would bound per-file memory for large files.
+> - `schema.ts`: `zodToStrictJsonSchema(z.string())` (non-object top-level) succeeds but produces `{type:'string'}`, which the DeepSeek API rejects — `parameters` must be `type: object`. Add a top-level `ZodObject` assertion at the entry point.
+> - `schema.ts`: every `instanceof z.ZodX` check is Zod v3-specific; the Zod v4 migration will require updating each branch. Treat as a tools/schema task, not a trivial dep bump.
+> - `registry.ts`: `t.inputSchema as unknown as z.ZodTypeAny` double cast in `definitions()` could collapse to a single cast (cosmetic — both are runtime no-ops).
+> - `schema.ts`: unsupported-Zod-type error message lacks a field-path breadcrumb; nested-schema errors are harder to localise. Optional DX improvement.
+
+---
+
 ## Phase 5 — BullMQ Background Tasks
 
 Heavy I/O (bash, builds, tests) is dispatched to BullMQ jobs (R6). Worker uses `child_process.spawn` (never `exec`). Notification bridge feeds completed jobs back into the orchestrator's history.

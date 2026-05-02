@@ -13,6 +13,6 @@ export const writeFileTool: Tool<{ path: string; content: string }> = {
   run: async ({ path, content }) => {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content, 'utf8');
-    return `wrote ${content.length} bytes to ${path}`;
+    return `wrote ${Buffer.byteLength(content, 'utf8')} bytes to ${path}`;
   },
 };

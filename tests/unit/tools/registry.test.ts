@@ -128,4 +128,21 @@ describe('ToolRegistry', () => {
     expect(names).toContain('tool1');
     expect(names).toContain('tool2');
   });
+
+  it('run() receives the Zod-parsed value, not the raw input (coercion contract)', async () => {
+    const r = new ToolRegistry();
+    let received: unknown;
+    r.register({
+      name: 'capture',
+      description: 'd',
+      capability: 'execution',
+      inputSchema: z.object({ n: z.coerce.number() }),
+      run: async (input) => {
+        received = input.n;
+        return 'ok';
+      },
+    });
+    await r.invoke('capture', { n: '42' }); // string in
+    expect(received).toBe(42); // coerced number out
+  });
 });

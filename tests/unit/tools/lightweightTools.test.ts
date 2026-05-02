@@ -45,7 +45,8 @@ describe('lightweight tools', () => {
     const r = new ToolRegistry();
     r.register(listDirTool);
     const out = await r.invoke('list_dir', { path: tmp });
-    expect(out.split('\n').sort()).toEqual(['a.txt', 'b.txt', 'sub']);
+    // Direct comparison — re-sorting in the test would mask a regression in listDir's sort
+    expect(out).toBe('a.txt\nb.txt\nsub');
   });
 
   it('grep returns matching path:line:text triples', async () => {
@@ -99,5 +100,25 @@ describe('lightweight tools', () => {
       (l) => l.includes('c.txt') && l.includes('hello from subdirectory'),
     );
     expect(hasSubMatch).toBe(true);
+  });
+
+  it('grep rejects malformed regex with a SyntaxError', async () => {
+    const r = new ToolRegistry();
+    r.register(grepTool);
+    await expect(r.invoke('grep', { pattern: '[invalid', path: tmp })).rejects.toThrow(SyntaxError);
+  });
+
+  it('grep skips symlinks so circular links cannot hang the walk', async () => {
+    const { mkdir, symlink } = await import('node:fs/promises');
+    const cycleDir = join(tmp, 'cyclic');
+    await mkdir(cycleDir);
+    // Circular: tmp/cyclic/parent_link -> tmp.  If grep followed symlinks, it would loop.
+    await symlink(tmp, join(cycleDir, 'parent_link'));
+    const r = new ToolRegistry();
+    r.register(grepTool);
+    const out = await r.invoke('grep', { pattern: 'hello', path: tmp });
+    const lines = out.split('\n').filter(Boolean);
+    // Exactly 3: a.txt:1, a.txt:3, sub/c.txt:1 — no extras from the symlink
+    expect(lines).toHaveLength(3);
   });
 });

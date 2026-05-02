@@ -1,5 +1,5 @@
 // src/tools/grep.ts
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import { z } from 'zod';
 import type { Tool } from './registry.js';
@@ -33,7 +33,12 @@ async function walk(
     const next = queue.shift();
     if (!next) break;
     const { abs, rel } = next;
-    const st = await stat(abs);
+    // lstat (not stat) so symlinks don't dereference — circular links would otherwise hang the walk.
+    const st = await lstat(abs);
+    if (st.isSymbolicLink()) {
+      // Skip — sandboxing/traversal policy lives at the security gateway (R11), not here.
+      continue;
+    }
     if (st.isFile()) {
       // Use path.relative for cross-platform correctness; fall back to basename when abs === root
       const rawRel = rel !== '' ? rel : relative(root, abs);

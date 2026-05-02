@@ -200,7 +200,7 @@ export type StreamEvent =
   | { type: 'content_delta'; text: string }
   | { type: 'tool_call'; id: string; name: string; args: unknown }
   | { type: 'done'; usage: Usage }
-  | { type: 'error'; cause: Error };
+  | { type: 'error'; cause: unknown };
 
 export const isReasoningDelta = (e: StreamEvent): e is Extract<StreamEvent, { type: 'reasoning_delta' }> =>
   e.type === 'reasoning_delta';
@@ -293,9 +293,13 @@ export type ToolResult = {
 
 export type SystemMessage = { role: 'system'; content: string };
 export type UserMessage = { role: 'user'; content: string };
+/**
+ * Assistant turn. `content` may be `null` when the turn is purely a tool call
+ * (matches OpenAI / DeepSeek wire convention; V4 may also emit reasoning-only turns).
+ */
 export type AssistantMessage = {
   role: 'assistant';
-  content: string;
+  content: string | null;
   reasoning_content?: string;
   tool_calls?: ToolCall[];
 };
@@ -336,14 +340,18 @@ git commit -m "feat(adapters): Message/ToolCall/ToolResult types with R2 helpers
 **Files:**
 
 - Create: `src/transport/sseClient.ts`
-- Test: `tests/unit/adapters/sseClient.test.ts`
+- Test: `tests/unit/transport/sseClient.test.ts` (path mirrors `src/transport/`)
+
+The parser must comply with the SSE spec line-terminator rules (HTML Living Standard §9.2): `\r\n`, `\n`, and bare `\r` are all valid separators. Many real servers (Nginx, Cloudflare) emit CRLF; the parser normalises every chunk to LF before scanning.
+
+`openSseConnection` throws a typed `SseConnectionError` carrying `status`, `statusText`, and the response `body` so callers can surface DeepSeek's structured error envelopes (`{error: {message, type, code}}`).
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// tests/unit/adapters/sseClient.test.ts
-import { describe, it, expect } from 'vitest';
-import { parseSseStream } from '../../../src/transport/sseClient.js';
+// tests/unit/transport/sseClient.test.ts
+import { describe, expect, it } from 'vitest';
+import { SseConnectionError, parseSseStream } from '../../../src/transport/sseClient.js';
 
 const encoder = new TextEncoder();
 
@@ -351,30 +359,69 @@ async function* chunks(...parts: string[]): AsyncIterable<Uint8Array> {
   for (const p of parts) yield encoder.encode(p);
 }
 
+async function collect(stream: AsyncIterable<string>): Promise<string[]> {
+  const out: string[] = [];
+  for await (const e of stream) out.push(e);
+  return out;
+}
+
 describe('parseSseStream', () => {
   it('emits one event per data: line, terminating on [DONE]', async () => {
-    const stream = chunks(
-      'data: {"a":1}\n\n',
-      'data: {"a":2}\n\n',
-      'data: [DONE]\n\n',
+    const events = await collect(
+      parseSseStream(chunks('data: {"a":1}\n\n', 'data: {"a":2}\n\n', 'data: [DONE]\n\n')),
     );
-    const events: string[] = [];
-    for await (const ev of parseSseStream(stream)) events.push(ev);
     expect(events).toEqual(['{"a":1}', '{"a":2}']);
   });
 
   it('reassembles events split mid-chunk', async () => {
-    const stream = chunks('data: {"a"', ':1}\n\nda', 'ta: {"a":2}\n\n', 'data: [DONE]\n\n');
-    const events: string[] = [];
-    for await (const ev of parseSseStream(stream)) events.push(ev);
+    const events = await collect(
+      parseSseStream(chunks('data: {"a"', ':1}\n\nda', 'ta: {"a":2}\n\n', 'data: [DONE]\n\n')),
+    );
     expect(events).toEqual(['{"a":1}', '{"a":2}']);
   });
 
-  it('ignores comment lines and empty data', async () => {
-    const stream = chunks(': keep-alive\n\ndata: {"a":1}\n\ndata: [DONE]\n\n');
-    const events: string[] = [];
-    for await (const ev of parseSseStream(stream)) events.push(ev);
+  it('ignores comment lines and empty data payloads', async () => {
+    const events = await collect(
+      parseSseStream(chunks(': keep-alive\n\ndata: \n\ndata: {"a":1}\n\ndata: [DONE]\n\n')),
+    );
     expect(events).toEqual(['{"a":1}']);
+  });
+
+  it('handles CRLF separators per SSE spec (HTML §9.2)', async () => {
+    const events = await collect(
+      parseSseStream(chunks('data: {"a":1}\r\n\r\ndata: {"a":2}\r\n\r\ndata: [DONE]\r\n\r\n')),
+    );
+    expect(events).toEqual(['{"a":1}', '{"a":2}']);
+  });
+
+  it('handles a CRLF split awkwardly across chunks (CR at end of one, LF at start of next)', async () => {
+    const events = await collect(
+      parseSseStream(chunks('data: {"a":1}\r', '\n\r\ndata: [DONE]\r\n\r\n')),
+    );
+    expect(events).toEqual(['{"a":1}']);
+  });
+
+  it('tolerates trailing whitespace on the [DONE] sentinel', async () => {
+    const events = await collect(parseSseStream(chunks('data: {"a":1}\n\ndata: [DONE]  \n\n')));
+    expect(events).toEqual(['{"a":1}']);
+  });
+
+  it('drains a final event when the stream closes without trailing blank line', async () => {
+    const events = await collect(parseSseStream(chunks('data: {"a":1}')));
+    expect(events).toEqual(['{"a":1}']);
+  });
+});
+
+describe('SseConnectionError', () => {
+  it('carries status, statusText, and body', () => {
+    const err = new SseConnectionError(400, 'Bad Request', '{"error":{"message":"bad arg"}}');
+    expect(err.status).toBe(400);
+    expect(err.statusText).toBe('Bad Request');
+    expect(err.body).toContain('bad arg');
+    expect(err.message).toContain('400');
+    expect(err.message).toContain('bad arg');
+    expect(err.name).toBe('SseConnectionError');
+    expect(err).toBeInstanceOf(Error);
   });
 });
 ```
@@ -382,7 +429,7 @@ describe('parseSseStream', () => {
 - [ ] **Step 2: Run to verify failure**
 
 ```bash
-pnpm test tests/unit/adapters/sseClient.test.ts
+pnpm test tests/unit/transport/sseClient.test.ts
 ```
 
 Expected: FAIL — module not found.
@@ -391,6 +438,10 @@ Expected: FAIL — module not found.
 
 ```ts
 // src/transport/sseClient.ts
+import { Readable } from 'node:stream';
+
+const DATA_PREFIX = 'data:';
+const DATA_PREFIX_LEN = DATA_PREFIX.length;
 const DONE_MARKER = '[DONE]';
 
 export async function* parseSseStream(
@@ -399,29 +450,38 @@ export async function* parseSseStream(
   const decoder = new TextDecoder();
   let buffer = '';
   for await (const chunk of byteStream) {
-    buffer += decoder.decode(chunk, { stream: true });
-    let nl: number;
-    while ((nl = buffer.indexOf('\n\n')) !== -1) {
+    buffer = normaliseLineEndings(buffer + decoder.decode(chunk, { stream: true }));
+    let nl = buffer.indexOf('\n\n');
+    while (nl !== -1) {
       const event = buffer.slice(0, nl);
       buffer = buffer.slice(nl + 2);
+      nl = buffer.indexOf('\n\n');
       const payload = extractDataPayload(event);
       if (payload === null) continue;
       if (payload === DONE_MARKER) return;
       yield payload;
     }
   }
-  // Drain any final event if the stream closed without trailing \n\n.
   if (buffer.length > 0) {
     const payload = extractDataPayload(buffer);
     if (payload !== null && payload !== DONE_MARKER) yield payload;
   }
 }
 
+function normaliseLineEndings(s: string): string {
+  return s.replace(/\r\n?/g, '\n');
+}
+
 function extractDataPayload(event: string): string | null {
   const lines = event.split('\n');
-  const dataLines = lines.filter((l) => l.startsWith('data:'));
+  const dataLines = lines.filter((l) => l.startsWith(DATA_PREFIX));
   if (dataLines.length === 0) return null;
-  return dataLines.map((l) => l.slice(5).trimStart()).join('\n');
+  const joined = dataLines
+    .map((l) => l.slice(DATA_PREFIX_LEN).trimStart())
+    .join('\n')
+    .trimEnd();
+  if (joined.length === 0) return null;
+  return joined;
 }
 
 export type FetchInit = {
@@ -431,33 +491,54 @@ export type FetchInit = {
   signal?: AbortSignal;
 };
 
+export class SseConnectionError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly statusText: string,
+    public readonly body: string,
+  ) {
+    super(`SSE connection failed: ${status} ${statusText} — ${body || '<empty body>'}`);
+    this.name = 'SseConnectionError';
+  }
+}
+
 export async function openSseConnection(init: FetchInit): Promise<AsyncIterable<Uint8Array>> {
-  const res = await fetch(init.url, {
+  const requestInit: RequestInit = {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream', ...init.headers },
     body: JSON.stringify(init.body),
-    signal: init.signal,
-  });
+  };
+  if (init.signal !== undefined) requestInit.signal = init.signal;
+
+  const res = await fetch(init.url, requestInit);
   if (!res.ok || !res.body) {
-    throw new Error(`SSE connection failed: ${res.status} ${res.statusText}`);
+    let body = '';
+    try {
+      body = res.body ? await res.text() : '';
+    } catch {
+      body = '<failed to read body>';
+    }
+    throw new SseConnectionError(res.status, res.statusText, body);
   }
-  return res.body as unknown as AsyncIterable<Uint8Array>;
+  return Readable.fromWeb(
+    res.body as unknown as Parameters<typeof Readable.fromWeb>[0],
+  ) as unknown as AsyncIterable<Uint8Array>;
 }
 ```
 
 - [ ] **Step 4: Run to verify pass**
 
 ```bash
-pnpm test tests/unit/adapters/sseClient.test.ts
+pnpm test tests/unit/transport/sseClient.test.ts
 ```
 
-Expected: PASS — 3 tests.
+Expected: PASS — 8 tests (7 parser + 1 SseConnectionError).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/transport/sseClient.ts tests/unit/adapters/sseClient.test.ts
-git commit -m "feat(transport): SSE parser handling chunk splits, comments, [DONE]"
+git add src/transport/sseClient.ts tests/unit/transport/sseClient.test.ts
+git commit -m "feat(transport): SSE parser (CRLF-aware) + typed SseConnectionError"
 ```
 
 ---

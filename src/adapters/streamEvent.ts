@@ -10,7 +10,7 @@ export type StreamEvent =
   | { type: 'content_delta'; text: string }
   | { type: 'tool_call'; id: string; name: string; args: unknown }
   | { type: 'done'; usage: Usage }
-  | { type: 'error'; cause: Error };
+  | { type: 'error'; cause: unknown };
 
 export const isReasoningDelta = (
   e: StreamEvent,

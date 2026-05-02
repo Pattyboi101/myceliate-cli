@@ -13,9 +13,13 @@ export type ToolResult = {
 
 export type SystemMessage = { role: 'system'; content: string };
 export type UserMessage = { role: 'user'; content: string };
+/**
+ * Assistant turn. `content` may be `null` when the turn is purely a tool call
+ * (matches OpenAI / DeepSeek wire convention; V4 may also emit reasoning-only turns).
+ */
 export type AssistantMessage = {
   role: 'assistant';
-  content: string;
+  content: string | null;
   reasoning_content?: string;
   tool_calls?: ToolCall[];
 };

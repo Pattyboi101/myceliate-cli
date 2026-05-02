@@ -26,4 +26,19 @@ describe('detectLeakedDsml', () => {
     expect(result.toolCalls[0]?.id).toBe('a');
     expect(result.toolCalls[1]?.id).toBe('b');
   });
+
+  it('preserves trailing content after a leaked DSML block', () => {
+    const result = detectLeakedDsml(
+      '<|DSML|tool_calls><call id="a" name="x"></call></|DSML|tool_calls> trailing text',
+    );
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.cleanedText).toBe(' trailing text');
+  });
+
+  it('falls back to lossless raw text when DSML is malformed (open without close)', () => {
+    const text = 'thinking <|DSML|tool_calls> garbage with no close marker';
+    const result = detectLeakedDsml(text);
+    expect(result.toolCalls).toEqual([]);
+    expect(result.cleanedText).toBe(text);
+  });
 });

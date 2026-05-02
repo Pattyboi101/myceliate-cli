@@ -181,4 +181,92 @@ describe('V4Adapter', () => {
     );
     expect(events.map((e) => e.type)).toEqual(['content_delta', 'error']);
   });
+
+  // ── Leak fallback wired through delta.reasoning_content ────────────────────
+  it('extracts tool calls leaked into reasoning_content (vLLM/NIM rescue)', async () => {
+    async function* leakedStream(): AsyncIterable<Uint8Array> {
+      // Upstream middleware bug: DSML markers leaked into reasoning_content rather than
+      // being stripped to a structured tool_calls field.
+      const lines = [
+        'data: {"choices":[{"delta":{"reasoning_content":"plan <|DSML|tool_calls><call id=\\"t\\" name=\\"ls\\"></call></|DSML|tool_calls> done"}}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"completion_tokens_details":{"reasoning_tokens":1}}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+      for (const l of lines) yield enc.encode(l);
+    }
+    const opener = vi.fn().mockResolvedValue(leakedStream());
+    const adapter = new V4Adapter({ apiKey: 'k', baseUrl: 'x', openSse: opener });
+    const events = await collect(
+      adapter.stream({
+        model: 'm',
+        messages: [{ role: 'user', content: 'hi' }],
+        thinking: true,
+        strict: true,
+      }),
+    );
+    expect(events).toContainEqual({
+      type: 'reasoning_delta',
+      text: 'plan  done',
+    });
+    expect(events).toContainEqual({ type: 'tool_call', id: 't', name: 'ls', args: {} });
+    expect(events.at(-1)).toMatchObject({ type: 'done' });
+  });
+
+  // ── Parser flush at terminal finish — drain content-mode tail ──────────────
+  it('drains the DSML parser content-mode tail at terminal finish_reason', async () => {
+    async function* taillyStream(): AsyncIterable<Uint8Array> {
+      // Content ends with bytes that *could* start an OPEN_BLOCK (`<|D`).
+      // Without a flush, those bytes get withheld forever.
+      const lines = [
+        'data: {"choices":[{"delta":{"content":"hello tail<|D"}}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"completion_tokens_details":{"reasoning_tokens":0}}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+      for (const l of lines) yield enc.encode(l);
+    }
+    const opener = vi.fn().mockResolvedValue(taillyStream());
+    const adapter = new V4Adapter({ apiKey: 'k', baseUrl: 'x', openSse: opener });
+    const events = await collect(
+      adapter.stream({
+        model: 'm',
+        messages: [{ role: 'user', content: 'hi' }],
+        thinking: true,
+        strict: true,
+      }),
+    );
+    const contentTexts = events
+      .filter((e): e is Extract<typeof e, { type: 'content_delta' }> => e.type === 'content_delta')
+      .map((e) => e.text);
+    expect(contentTexts.join('')).toBe('hello tail<|D');
+  });
+
+  // ── Round-trip: assistant DSML re-emission parses back to original args ────
+  it('serialised assistant tool_calls round-trip through the parser', async () => {
+    const opener = vi.fn().mockResolvedValue(fixture());
+    const adapter = new V4Adapter({ apiKey: 'k', baseUrl: 'x', openSse: opener });
+    const args = { sql: 'a < b AND c > d', tag: '<div class="x">y</div>', n: 7 };
+    await collect(
+      adapter.stream({
+        model: 'm',
+        messages: [
+          { role: 'user', content: 'go' },
+          { role: 'assistant', content: null, tool_calls: [{ id: 't&1', name: 'q<x>', args }] },
+        ],
+        thinking: true,
+        strict: true,
+      }),
+    );
+    const messages = (opener.mock.calls[0]?.[0].body as { messages: { content: string }[] })
+      .messages;
+    const assistantContent = messages[1]?.content ?? '';
+    // Round-trip: feed the wire shape back through the parser.
+    const { DsmlParser } = await import('../../../src/adapters/v4/dsmlParser.js');
+    const events = new DsmlParser().feed(assistantContent);
+    expect(events).toContainEqual({
+      type: 'tool_call',
+      id: 't&1',
+      name: 'q<x>',
+      args,
+    });
+  });
 });

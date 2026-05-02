@@ -1526,6 +1526,18 @@ git commit -m "feat(adapters/v4): adapter composing SSE, DSML parser, V4 message
 
 ---
 
+> **Phase 3 review-iteration note:** During Phase 3 execution, code review surfaced refinements applied beyond Tasks 7–9 specs (commit `<phase-3-fixes>`):
+>
+> - **DSML escape contract (XML 1.0 entity subset)** added to both parser and serializer. String-mode param values, JSON-mode param values, and attribute values (id, name, key) all carry `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`. The parser unescapes after extraction; the serializer escapes before emission. Closes a silent param-drop bug (parser treated literal `<` in string values as a tag start, consumed `</param>`, dropped the param) and a malformed-DSML round-trip bug (serializer produced unparseable wire format for args containing the entity characters).
+> - **Parser is now mode-aware inside `<param>` values.** When the current pending param is open, the tokeniser scans specifically for `</param>` rather than treating any `<...>` as a tag. Rewritten `consumeBlockSegment` removes the "unknown tag inside block" branch and the trailing-text capture path that depended on it.
+> - **`DsmlParser.flush()` method added.** Emits any tail buffered in content mode as a final `content_delta` (the safe-prefix logic withholds bytes that could start a partial OPEN_BLOCK; once the upstream signals terminal `finish_reason`, those bytes can't be a partial marker any more). Drops incomplete block-mode bytes to refuse silent dispatch of half-formed tool calls.
+> - **Adapter calls `dsml.flush()` on terminal `finish_reason`** before yielding `done`.
+> - **`detectLeakedDsml` is lossless.** Imports `OPEN_BLOCK` and `CLOSE_BLOCK` constants; if upstream emits `OPEN_BLOCK` without a matching close (genuinely malformed), returns the raw text rather than silently dropping it.
+> - **Performance / cleanup:** memoised attribute regexes (no `new RegExp` per tag); `OPEN_BLOCK` and `CLOSE_BLOCK` exported from `dsmlParser.ts` and consumed by `leakFallback.ts` to eliminate the literal duplication.
+> - **Tests expanded:** parser gets 21 new tests (escape entities, attribute escaping, literal `<`-rescue regression, 11-case round-trip property test, buffer-advancement multi-feed regression, three flush() cases, escapeXml/unescapeXml unit). Adapter gets 3 new tests (leak fallback wired through `reasoning_content`, parser flush at terminal, assistant DSML round-trip). Leak fallback gets 2 new tests (trailing content preserved, malformed-leak fallback). Total: 13 → 33 V4 tests; repo total: 41 → 67 tests.
+>
+> Treat the code in `src/adapters/v4/` and the tests under `tests/unit/adapters/v4-*.test.ts` as the source of truth.
+
 ### Task 10: Cross-adapter parity test (V3 vs V4 produce the same StreamEvents for equivalent fixtures)
 
 **Files:**

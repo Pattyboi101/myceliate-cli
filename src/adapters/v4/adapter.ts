@@ -3,7 +3,7 @@ import type { FetchInit } from '../../transport/sseClient.js';
 import type { ChatRequest, DeepSeekClient } from '../DeepSeekClient.js';
 import type { Message } from '../messages.js';
 import type { StreamEvent } from '../streamEvent.js';
-import { DsmlParser } from './dsmlParser.js';
+import { DsmlParser, escapeXml } from './dsmlParser.js';
 import { detectLeakedDsml } from './leakFallback.js';
 
 type SseOpener = (init: FetchInit) => Promise<AsyncIterable<Uint8Array>>;
@@ -68,8 +68,12 @@ export function serializeMessage(m: Message): unknown {
       if (m.tool_calls) {
         // V4 expects historical tool_calls re-serialized as DSML markup in content
         // for context continuity. This differs from V3 which uses a tool_calls array.
+        // Attribute values escaped to keep markup well-formed for arbitrary names/ids.
         const dsml = `<|DSML|tool_calls>${m.tool_calls
-          .map((tc) => `<call id="${tc.id}" name="${tc.name}">${serializeArgs(tc.args)}</call>`)
+          .map(
+            (tc) =>
+              `<call id="${escapeXml(tc.id)}" name="${escapeXml(tc.name)}">${serializeArgs(tc.args)}</call>`,
+          )
           .join('')}</|DSML|tool_calls>`;
         out.content = `${m.content ?? ''}${dsml}`;
       }
@@ -83,14 +87,18 @@ export function serializeMessage(m: Message): unknown {
 /**
  * Serialises tool call args as DSML param tags.
  * Strings get `string="true"` and raw value; everything else gets `string="false"` and JSON.stringify.
+ *
+ * All values and attribute strings are XML-escaped so that `<`, `>`, `&`, `"`, `'`
+ * inside user data round-trip through the parser losslessly. The parser unescapes
+ * symmetrically. See `dsmlParser.escapeXml`/`unescapeXml`.
  */
 export function serializeArgs(args: unknown): string {
   if (args === null || typeof args !== 'object') return '';
   return Object.entries(args as Record<string, unknown>)
     .map(([k, v]) => {
       const isString = typeof v === 'string';
-      const value = isString ? (v as string) : JSON.stringify(v);
-      return `<param key="${k}" string="${isString}">${value}</param>`;
+      const rawValue = isString ? (v as string) : JSON.stringify(v);
+      return `<param key="${escapeXml(k)}" string="${isString}">${escapeXml(rawValue)}</param>`;
     })
     .join('');
 }
@@ -154,6 +162,9 @@ export class V4Adapter implements DeepSeekClient {
         const finish = choice?.finish_reason;
         // Phase-2 lesson: always emit done for ANY terminal finish_reason; zero-fill usage.
         if (typeof finish === 'string' && TERMINAL_FINISH_REASONS.has(finish)) {
+          // Drain any content-mode tail bytes the safe-prefix logic withheld. At
+          // terminal finish, those bytes can't be a partial OPEN_BLOCK any more.
+          for (const e of dsml.flush()) yield e;
           const u = chunk.usage;
           yield {
             type: 'done',

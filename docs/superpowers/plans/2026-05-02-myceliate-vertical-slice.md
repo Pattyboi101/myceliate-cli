@@ -610,6 +610,17 @@ export interface DeepSeekClient {
    * Streams canonical events. Adapters own their wire format end-to-end (R1):
    * the V3 adapter parses JSON tool_calls, the V4 adapter parses DSML markers.
    * Callers consume only StreamEvent.
+   *
+   * Error semantics — the iterator never throws:
+   *   - Pre-stream connection failures (incl. SseConnectionError): yield one
+   *     `{type: 'error', cause}` then return.
+   *   - Mid-stream failures (network drop, decode error): yield
+   *     `{type: 'error', cause}` then return.
+   *   - Per-chunk parse failures: yield `{type: 'error', cause}` and continue
+   *     (other chunks may still parse).
+   *   - Streams always terminate with `{type: 'done', usage}` when the upstream
+   *     reports any terminal `finish_reason` (`stop`, `tool_calls`, `length`,
+   *     `content_filter`); usage fields are zero-filled when upstream omits them.
    */
   stream(req: ChatRequest): AsyncIterable<StreamEvent>;
 
@@ -845,6 +856,15 @@ git commit -m "feat(adapters/v3): SSE chunk parser yielding canonical StreamEven
 ```
 
 ---
+
+> **Phase 2 review-iteration note:** During Phase 2 execution, code review surfaced refinements applied beyond this spec (commit `7815b9a`):
+>
+> - Parser: emit terminal `done` event on any terminal `finish_reason` (zero-fill usage if missing); flush pending `tool_calls` on any terminal finish (not just `'tool_calls'`); use `typeof === 'string'` + length check to consistently drop empty deltas; treat `length`/`content_filter` as terminal too.
+> - Adapter: `stream()` iterator never throws — pre-stream and mid-stream errors yield `{type: 'error', cause}` then return.
+> - Adapter: `serializeMessage` and `buildRequestBody` extracted as top-level helpers so the V4 adapter can reuse them.
+> - Tests expanded: parser gets `done`-without-usage, empty-delta drop, flush-on-stop, parallel tool calls, zero-arg tools (4→9 tests). Adapter gets wire-shape coverage (R3 `strict` per-function, `tool_choice`, auth header, URL, message serialisation including `null` content), plus pre-stream and mid-stream error-event tests (2→6 tests).
+>
+> Treat the code in `src/adapters/v3/` and the tests under `tests/unit/adapters/v3-*.test.ts` as the source of truth for these iterations. The skeleton spec below remains the bootstrap shape.
 
 ### Task 6: V3 adapter (composes SSE + parser)
 

@@ -764,7 +764,8 @@ export function* parseV3Chunk(state: V3StreamState, json: string): Generator<Str
   try {
     chunk = JSON.parse(json) as V3DeltaChunk;
   } catch (cause) {
-    yield { type: 'error', cause: cause instanceof Error ? cause : new Error(String(cause)) };
+    // StreamEvent.error.cause is `unknown`; pass through without lossy wrapping.
+    yield { type: 'error', cause };
     return;
   }
 
@@ -800,7 +801,11 @@ export function* parseV3Chunk(state: V3StreamState, json: string): Generator<Str
       try {
         args = JSON.parse(pending.argsBuffer || '{}');
       } catch (cause) {
-        yield { type: 'error', cause: new Error(`Tool call args JSON parse failed: ${pending.argsBuffer}`, { cause: cause instanceof Error ? cause : undefined }) };
+        // Wrap to add context, but preserve the original cause via Error.cause.
+        yield {
+          type: 'error',
+          cause: new Error(`Tool call args JSON parse failed: ${pending.argsBuffer}`, { cause }),
+        };
         continue;
       }
       yield { type: 'tool_call', id: pending.id, name: pending.name, args };

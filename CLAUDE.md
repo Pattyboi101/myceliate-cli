@@ -187,3 +187,4 @@ If you find yourself building any of the following, stop and surface the scope e
 - Continuous-learning skill synthesis (Hermes-style)
 - MCP server integration
 - FTS5 / SQLite memory store
+- Worker / QueueEvents dual Redis connection (R6) — `src/queue/worker.ts` currently shares the `getRedis()` singleton across `Worker` and `QueueEvents`. BullMQ recommends separate `Redis` instances to avoid blocking-read deadlocks under load. Acceptable for the v1 vertical slice; production-readiness needs the split.

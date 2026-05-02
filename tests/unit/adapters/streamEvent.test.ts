@@ -1,6 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
-import { isToolCall, isContentDelta, isReasoningDelta, isDone } from '../../../src/adapters/streamEvent.js';
+import {
+  isContentDelta,
+  isDone,
+  isReasoningDelta,
+  isToolCall,
+} from '../../../src/adapters/streamEvent.js';
 
 describe('StreamEvent', () => {
   it('discriminates reasoning_delta, content_delta, tool_call, done, error', () => {

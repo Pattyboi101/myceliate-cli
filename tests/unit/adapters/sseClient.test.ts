@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { parseSseStream } from '../../../src/transport/sseClient.js';
 
 const encoder = new TextEncoder();
@@ -9,11 +9,7 @@ async function* chunks(...parts: string[]): AsyncIterable<Uint8Array> {
 
 describe('parseSseStream', () => {
   it('emits one event per data: line, terminating on [DONE]', async () => {
-    const stream = chunks(
-      'data: {"a":1}\n\n',
-      'data: {"a":2}\n\n',
-      'data: [DONE]\n\n',
-    );
+    const stream = chunks('data: {"a":1}\n\n', 'data: {"a":2}\n\n', 'data: [DONE]\n\n');
     const events: string[] = [];
     for await (const ev of parseSseStream(stream)) events.push(ev);
     expect(events).toEqual(['{"a":1}', '{"a":2}']);

@@ -12,10 +12,12 @@ export type StreamEvent =
   | { type: 'done'; usage: Usage }
   | { type: 'error'; cause: Error };
 
-export const isReasoningDelta = (e: StreamEvent): e is Extract<StreamEvent, { type: 'reasoning_delta' }> =>
-  e.type === 'reasoning_delta';
-export const isContentDelta = (e: StreamEvent): e is Extract<StreamEvent, { type: 'content_delta' }> =>
-  e.type === 'content_delta';
+export const isReasoningDelta = (
+  e: StreamEvent,
+): e is Extract<StreamEvent, { type: 'reasoning_delta' }> => e.type === 'reasoning_delta';
+export const isContentDelta = (
+  e: StreamEvent,
+): e is Extract<StreamEvent, { type: 'content_delta' }> => e.type === 'content_delta';
 export const isToolCall = (e: StreamEvent): e is Extract<StreamEvent, { type: 'tool_call' }> =>
   e.type === 'tool_call';
 export const isDone = (e: StreamEvent): e is Extract<StreamEvent, { type: 'done' }> =>

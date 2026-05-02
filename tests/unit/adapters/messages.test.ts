@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Message } from '../../../src/adapters/messages.js';
-import { hasToolCalls, hasReasoningContent } from '../../../src/adapters/messages.js';
+import { hasReasoningContent, hasToolCalls } from '../../../src/adapters/messages.js';
 
 describe('Message', () => {
   it('detects assistant messages with tool calls (R2: reasoning_content must be retained)', () => {

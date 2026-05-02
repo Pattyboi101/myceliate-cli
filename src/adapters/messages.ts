@@ -29,4 +29,6 @@ export const hasToolCalls = (m: Message): m is AssistantMessage & { tool_calls: 
 export const hasReasoningContent = (
   m: Message,
 ): m is AssistantMessage & { reasoning_content: string } =>
-  m.role === 'assistant' && typeof m.reasoning_content === 'string' && m.reasoning_content.length > 0;
+  m.role === 'assistant' &&
+  typeof m.reasoning_content === 'string' &&
+  m.reasoning_content.length > 0;

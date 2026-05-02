@@ -7,10 +7,11 @@ export async function* parseSseStream(
   let buffer = '';
   for await (const chunk of byteStream) {
     buffer += decoder.decode(chunk, { stream: true });
-    let nl: number;
-    while ((nl = buffer.indexOf('\n\n')) !== -1) {
+    let nl = buffer.indexOf('\n\n');
+    while (nl !== -1) {
       const event = buffer.slice(0, nl);
       buffer = buffer.slice(nl + 2);
+      nl = buffer.indexOf('\n\n');
       const payload = extractDataPayload(event);
       if (payload === null) continue;
       if (payload === DONE_MARKER) return;

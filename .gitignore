@@ -1,0 +1,18 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+*.log
+.DS_Store
+
+# Agent runtime artifacts
+.myceliate/
+.agent_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Research source documents (kept outside the package)
+../*.docx

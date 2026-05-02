@@ -22,8 +22,8 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "queue:worker": "tsx src/queue/worker.ts",
-    "redis:up": "docker compose up -d redis",
-    "redis:down": "docker compose down"
+    "redis:up": "docker compose up -d redis 2>/dev/null || docker run -d --rm --name myceliate-redis -p 6379:6379 redis:7-alpine redis-server --save 60 1 --loglevel warning",
+    "redis:down": "docker compose down 2>/dev/null || docker rm -f myceliate-redis"
   },
   "engines": {
     "node": ">=20.11.0"

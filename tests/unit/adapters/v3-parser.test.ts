@@ -85,4 +85,83 @@ describe('parseV3Chunk', () => {
       usage: { promptTokens: 10, completionTokens: 2, reasoningTokens: 5 },
     });
   });
+
+  it('emits done with zero-filled usage when upstream omits the usage block', () => {
+    const s = new V3StreamState();
+    const events = collect(s, [
+      JSON.stringify({ choices: [{ delta: { content: 'hi' } }] }),
+      JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] }),
+    ]);
+    expect(events.at(-1)).toEqual({
+      type: 'done',
+      usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 },
+    });
+  });
+
+  it('drops empty content/reasoning deltas (stream punctuation, not user-visible)', () => {
+    const s = new V3StreamState();
+    const events = collect(s, [
+      JSON.stringify({ choices: [{ delta: { content: '' } }] }),
+      JSON.stringify({ choices: [{ delta: { reasoning_content: '' } }] }),
+      JSON.stringify({ choices: [{ delta: { content: 'real' } }] }),
+    ]);
+    expect(events).toEqual([{ type: 'content_delta', text: 'real' }]);
+  });
+
+  it('flushes pending tool_calls even when finish_reason is "stop" (upstream lenience)', () => {
+    const s = new V3StreamState();
+    const events = collect(s, [
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [{ index: 0, id: 't1', function: { name: 'ls', arguments: '{}' } }],
+            },
+          },
+        ],
+      }),
+      JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] }),
+    ]);
+    expect(events).toContainEqual({ type: 'tool_call', id: 't1', name: 'ls', args: {} });
+    expect(events.at(-1)).toMatchObject({ type: 'done' });
+  });
+
+  it('emits parallel tool calls keyed by distinct index', () => {
+    const s = new V3StreamState();
+    const events = collect(s, [
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'a', function: { name: 'read_file', arguments: '{"path":"a"}' } },
+                { index: 1, id: 'b', function: { name: 'read_file', arguments: '{"path":"b"}' } },
+              ],
+            },
+          },
+        ],
+      }),
+      JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }),
+    ]);
+    const calls = events.filter((e) => e.type === 'tool_call');
+    expect(calls).toEqual([
+      { type: 'tool_call', id: 'a', name: 'read_file', args: { path: 'a' } },
+      { type: 'tool_call', id: 'b', name: 'read_file', args: { path: 'b' } },
+    ]);
+  });
+
+  it('handles tool calls with empty arguments (zero-arg tools)', () => {
+    const s = new V3StreamState();
+    const events = collect(s, [
+      JSON.stringify({
+        choices: [
+          {
+            delta: { tool_calls: [{ index: 0, id: 't', function: { name: 'list_dir' } }] },
+          },
+        ],
+      }),
+      JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }),
+    ]);
+    expect(events).toContainEqual({ type: 'tool_call', id: 't', name: 'list_dir', args: {} });
+  });
 });

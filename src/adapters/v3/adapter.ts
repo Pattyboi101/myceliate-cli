@@ -1,4 +1,5 @@
-import { type FetchInit, openSseConnection, parseSseStream } from '../../transport/sseClient.js';
+import { openSseConnection, parseSseStream } from '../../transport/sseClient.js';
+import type { FetchInit } from '../../transport/sseClient.js';
 import type { ChatRequest, DeepSeekClient } from '../DeepSeekClient.js';
 import type { Message } from '../messages.js';
 import type { StreamEvent } from '../streamEvent.js';
@@ -21,58 +22,81 @@ export class V3Adapter implements DeepSeekClient {
   }
 
   async *stream(req: ChatRequest): AsyncIterable<StreamEvent> {
-    const body = {
-      model: req.model,
-      messages: req.messages.map(this.serializeMessage),
-      stream: true,
-      ...(req.tools !== undefined
-        ? {
-            tools: req.tools.map((t) => ({
-              type: 'function',
-              function: {
-                name: t.name,
-                description: t.description,
-                parameters: t.parameters,
-                strict: req.strict,
-              },
-            })),
-            tool_choice: 'auto',
-          }
-        : {}),
-      ...(req.options ?? {}),
-    };
-    const byteStream = await this.opener({
-      url: `${this.opts.baseUrl}/v1/chat/completions`,
-      body,
-      headers: { authorization: `Bearer ${this.opts.apiKey}` },
-      ...(req.signal ? { signal: req.signal } : {}),
-    });
+    const body = buildRequestBody(req);
+
+    let byteStream: AsyncIterable<Uint8Array>;
+    try {
+      byteStream = await this.opener({
+        url: `${this.opts.baseUrl}/v1/chat/completions`,
+        body,
+        headers: { authorization: `Bearer ${this.opts.apiKey}` },
+        ...(req.signal ? { signal: req.signal } : {}),
+      });
+    } catch (cause) {
+      // Honour the DeepSeekClient contract: the iterator never throws.
+      // Pre-stream connection failures (incl. SseConnectionError) surface as events.
+      yield { type: 'error', cause };
+      return;
+    }
 
     const state = new V3StreamState();
-    for await (const json of parseSseStream(byteStream)) {
-      for (const event of parseV3Chunk(state, json)) yield event;
+    try {
+      for await (const json of parseSseStream(byteStream)) {
+        for (const event of parseV3Chunk(state, json)) yield event;
+      }
+    } catch (cause) {
+      // Mid-stream failures (network drop, decode error) also become events.
+      yield { type: 'error', cause };
     }
   }
+}
 
-  private serializeMessage = (m: Message): unknown => {
-    switch (m.role) {
-      case 'system':
-      case 'user':
-        return { role: m.role, content: m.content };
-      case 'assistant': {
-        const out: Record<string, unknown> = { role: 'assistant', content: m.content };
-        if (m.reasoning_content) out.reasoning_content = m.reasoning_content;
-        if (m.tool_calls) {
-          out.tool_calls = m.tool_calls.map((tc) => ({
-            id: tc.id,
+function buildRequestBody(req: ChatRequest): Record<string, unknown> {
+  return {
+    model: req.model,
+    messages: req.messages.map(serializeMessage),
+    stream: true,
+    ...(req.tools !== undefined
+      ? {
+          tools: req.tools.map((t) => ({
             type: 'function',
-            function: { name: tc.name, arguments: JSON.stringify(tc.args) },
-          }));
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters,
+              strict: req.strict, // R3 enforced per-function on the V3 wire.
+            },
+          })),
+          tool_choice: 'auto', // v1 always 'auto'; lift to ChatRequest.toolChoice in v2.
         }
-        return out;
-      }
-      case 'tool':
-        return { role: 'tool', tool_call_id: m.result.tool_use_id, content: m.result.content };
-    }
+      : {}),
+    ...(req.options ?? {}),
   };
+}
+
+/**
+ * Serialises a canonical Message into the OpenAI wire shape that V3 accepts.
+ * Top-level export so V4's adapter can reuse it (V4 messages are 80%+ identical;
+ * only the assistant body differs in DSML emission).
+ */
+export function serializeMessage(m: Message): unknown {
+  switch (m.role) {
+    case 'system':
+    case 'user':
+      return { role: m.role, content: m.content };
+    case 'assistant': {
+      const out: Record<string, unknown> = { role: 'assistant', content: m.content };
+      if (m.reasoning_content) out.reasoning_content = m.reasoning_content;
+      if (m.tool_calls) {
+        out.tool_calls = m.tool_calls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+        }));
+      }
+      return out;
+    }
+    case 'tool':
+      return { role: 'tool', tool_call_id: m.result.tool_use_id, content: m.result.content };
+  }
 }

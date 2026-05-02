@@ -31,6 +31,8 @@ type V3DeltaChunk = {
   };
 };
 
+const TERMINAL_FINISH_REASONS = new Set(['stop', 'tool_calls', 'length', 'content_filter']);
+
 export function* parseV3Chunk(state: V3StreamState, json: string): Generator<StreamEvent> {
   let chunk: V3DeltaChunk;
   try {
@@ -44,12 +46,15 @@ export function* parseV3Chunk(state: V3StreamState, json: string): Generator<Str
   const choice = chunk.choices?.[0];
   const delta = choice?.delta;
 
-  if (delta?.reasoning_content) {
+  // Pass through non-empty reasoning/content fragments. Empty strings are dropped
+  // deliberately (they're stream punctuation, not user-visible content).
+  if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
     yield { type: 'reasoning_delta', text: delta.reasoning_content };
   }
-  if (delta?.content) {
+  if (typeof delta?.content === 'string' && delta.content.length > 0) {
     yield { type: 'content_delta', text: delta.content };
   }
+
   if (delta?.tool_calls) {
     for (const tc of delta.tool_calls) {
       const existing = state.pending.get(tc.index);
@@ -67,7 +72,12 @@ export function* parseV3Chunk(state: V3StreamState, json: string): Generator<Str
     }
   }
 
-  if (choice?.finish_reason === 'tool_calls') {
+  const finish = choice?.finish_reason;
+  if (typeof finish === 'string' && TERMINAL_FINISH_REASONS.has(finish)) {
+    // Flush accumulated tool_calls regardless of finish_reason. OpenAI's wire
+    // contract pairs them with `finish_reason: 'tool_calls'`, but real upstreams
+    // sometimes finish with `'stop'` despite having emitted tool deltas; silently
+    // dropping intent is worse than yielding what we have.
     for (const pending of state.pending.values()) {
       let args: unknown = {};
       try {
@@ -80,23 +90,24 @@ export function* parseV3Chunk(state: V3StreamState, json: string): Generator<Str
         };
         continue;
       }
+      // args is intentionally `unknown` here; per CLAUDE.md, the orchestrator
+      // performs Zod validation at the tool-dispatch boundary, not the adapter.
       yield { type: 'tool_call', id: pending.id, name: pending.name, args };
     }
     state.pending.clear();
-  }
 
-  if (
-    chunk.usage !== undefined &&
-    (choice?.finish_reason === 'stop' || choice?.finish_reason === 'tool_calls')
-  ) {
+    // Always emit a terminal `done` event so the consumer's `for await` loop
+    // can rely on it. Zero-fill usage if upstream omits it (mid-stream cutoff,
+    // upstream variants).
+    const u = chunk.usage;
     yield {
       type: 'done',
       usage: {
-        promptTokens: chunk.usage.prompt_tokens ?? 0,
-        completionTokens: chunk.usage.completion_tokens ?? 0,
-        reasoningTokens: chunk.usage.completion_tokens_details?.reasoning_tokens ?? 0,
-        ...(chunk.usage.prompt_cache_hit_tokens !== undefined
-          ? { cacheHitTokens: chunk.usage.prompt_cache_hit_tokens }
+        promptTokens: u?.prompt_tokens ?? 0,
+        completionTokens: u?.completion_tokens ?? 0,
+        reasoningTokens: u?.completion_tokens_details?.reasoning_tokens ?? 0,
+        ...(u?.prompt_cache_hit_tokens !== undefined
+          ? { cacheHitTokens: u.prompt_cache_hit_tokens }
           : {}),
       },
     };

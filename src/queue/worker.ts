@@ -24,10 +24,26 @@ events.on('failed', ({ jobId, failedReason }) => {
   console.log(JSON.stringify({ event: 'failed', jobId, failedReason }));
 });
 
+let shuttingDown = false;
 const shutdown = async (): Promise<void> => {
-  await worker.close();
-  await events.close();
-  await closeRedis();
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // Each await wrapped so a failure in one step doesn't leak the rest. Idempotent on second signal.
+  try {
+    await worker.close();
+  } catch {
+    /* idempotent */
+  }
+  try {
+    await events.close();
+  } catch {
+    /* idempotent */
+  }
+  try {
+    await closeRedis();
+  } catch {
+    /* idempotent */
+  }
   process.exit(0);
 };
 process.on('SIGINT', shutdown);

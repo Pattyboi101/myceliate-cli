@@ -67,4 +67,17 @@ describe('runBashJob', () => {
     expect(result.stderr.length).toBeLessThanOrEqual(512 + 100);
     expect(result.truncated).toBe(true);
   });
+
+  it('resolves cleanly when spawn fails (invalid cwd)', async () => {
+    // Without a child.on('error') handler this would crash the worker via uncaughtException.
+    const input: BashJobInput = {
+      command: 'echo hi',
+      cwd: '/nonexistent/path/that/does/not/exist',
+      timeoutMs: 5000,
+    };
+    const result = await runBashJob(input);
+    expect(result.timedOut).toBe(false);
+    expect(result.stderr.length).toBeGreaterThan(0);
+    expect(result.exitCode).not.toBe(0);
+  });
 });

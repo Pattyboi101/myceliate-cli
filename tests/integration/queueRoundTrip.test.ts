@@ -35,30 +35,36 @@ d('queue round-trip (requires Redis)', () => {
 
   it('enqueues a bash job and receives the result', async () => {
     const queue = bashQueue();
-    const job = await queue.add('test-echo', {
-      toolUseId: 'tu1',
-      command: 'echo round-trip',
-      cwd: process.cwd(),
-      timeoutMs: 5000,
-    });
-    const result = await job.waitUntilFinished(events, 10_000);
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout.trim()).toBe('round-trip');
-    await queue.close();
+    try {
+      const job = await queue.add('test-echo', {
+        toolUseId: 'tu1',
+        command: 'echo round-trip',
+        cwd: process.cwd(),
+        timeoutMs: 5000,
+      });
+      const result = await job.waitUntilFinished(events, 10_000);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe('round-trip');
+    } finally {
+      await queue.close();
+    }
   });
 
   it('captures stderr and non-zero exit code through the queue', async () => {
     const queue = bashQueue();
-    const job = await queue.add('test-error', {
-      toolUseId: 'tu2',
-      command: 'echo error-out >&2; exit 42',
-      cwd: process.cwd(),
-      timeoutMs: 5000,
-    });
-    const result = await job.waitUntilFinished(events, 10_000);
-    expect(result.exitCode).toBe(42);
-    expect(result.stderr.trim()).toBe('error-out');
-    expect(result.stdout).toBe('');
-    await queue.close();
+    try {
+      const job = await queue.add('test-error', {
+        toolUseId: 'tu2',
+        command: 'echo error-out >&2; exit 42',
+        cwd: process.cwd(),
+        timeoutMs: 5000,
+      });
+      const result = await job.waitUntilFinished(events, 10_000);
+      expect(result.exitCode).toBe(42);
+      expect(result.stderr.trim()).toBe('error-out');
+      expect(result.stdout).toBe('');
+    } finally {
+      await queue.close();
+    }
   });
 });

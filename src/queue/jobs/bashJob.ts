@@ -72,5 +72,18 @@ export function runBashJob(input: BashJobInput): Promise<BashJobResult> {
       clearTimeout(timer);
       resolve({ exitCode, stdout, stderr, truncated, timedOut });
     });
+
+    // Catches spawn-time failures (invalid cwd, ENOENT, permission denied) so the Promise
+    // resolves cleanly instead of the unhandled EventEmitter error crashing the worker.
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({
+        exitCode: null,
+        stdout,
+        stderr: stderr || `spawn error: ${err.message}`,
+        truncated,
+        timedOut,
+      });
+    });
   });
 }

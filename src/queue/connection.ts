@@ -26,7 +26,11 @@ export function getRedis(url = process.env.REDIS_URL ?? 'redis://localhost:6379'
 
 export async function closeRedis(): Promise<void> {
   if (singleton) {
-    await singleton.quit();
+    try {
+      await singleton.quit();
+    } catch {
+      /* idempotent — already disconnected or restart in flight */
+    }
     singleton = null;
   }
 }

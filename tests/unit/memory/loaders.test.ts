@@ -130,4 +130,19 @@ describe('memory loaders', () => {
     expect(rec.body).toContain('reasoning');
     expect(rec.body).toContain('I reasoned carefully.');
   });
+
+  it('ConversationLog handles concurrent appendTurn without losing turns (init race)', async () => {
+    // Without an awaitable initPromise, concurrent appendTurn calls on a fresh
+    // instance both pass the init guard, both call store.write (truncating the
+    // file) — last write wins and the first turn's append is wiped.
+    const store = new MarkdownStore(join(tmp, '.myceliate'));
+    const log = new ConversationLog(store, 'sess-race');
+    await Promise.all([
+      log.appendTurn({ role: 'user', content: 'turn-A' }),
+      log.appendTurn({ role: 'user', content: 'turn-B' }),
+    ]);
+    const rec = await store.read('history/sess-race.md');
+    expect(rec.body).toContain('turn-A');
+    expect(rec.body).toContain('turn-B');
+  });
 });

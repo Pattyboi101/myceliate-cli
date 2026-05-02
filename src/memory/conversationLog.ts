@@ -6,13 +6,19 @@ import type { MarkdownStore } from './markdownStore.js';
  * Append-only log of a single agent session, persisted as
  * `.myceliate/history/<sessionId>.md`.
  *
- * NOTE: The `initialized` flag is per-instance. If two ConversationLog
- * instances point at the same sessionId both will attempt to write the
- * frontmatter header. Acceptable for v1 (single orchestrator → single
+ * Initialization is captured in a Promise<void> rather than a boolean:
+ * concurrent appendTurn calls on a fresh instance race past a boolean
+ * guard (both pass `if (!flag)`, both call store.write which truncates
+ * the file). Holding a Promise lets the second caller await the same
+ * write that the first kicked off — no double-truncate, no data loss.
+ *
+ * NOTE: This race lives within a single instance. If two ConversationLog
+ * instances point at the same sessionId both will still attempt to write
+ * the frontmatter header. Acceptable for v1 (single orchestrator → single
  * ConversationLog per session).
  */
 export class ConversationLog {
-  private initialized = false;
+  private initPromise: Promise<void> | null = null;
   constructor(
     private readonly store: MarkdownStore,
     private readonly sessionId: string,
@@ -23,14 +29,14 @@ export class ConversationLog {
   }
 
   async appendTurn(message: Message): Promise<void> {
-    if (!this.initialized) {
-      await this.store.write(
+    if (!this.initPromise) {
+      this.initPromise = this.store.write(
         this.path(),
         { sessionId: this.sessionId, started: new Date().toISOString() },
         '',
       );
-      this.initialized = true;
     }
+    await this.initPromise;
     const block = renderTurn(message);
     await this.store.append(this.path(), block);
   }

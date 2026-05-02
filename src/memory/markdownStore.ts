@@ -73,9 +73,14 @@ export class MarkdownStore {
   }
 
   /**
-   * If `content.length` exceeds `maxBytes`, write the content to
-   * `<root>/artifacts/<id>.md` and return an ArtifactPointer.
+   * If the UTF-8 byte length of `content` exceeds `maxBytes`, write the
+   * content to `<root>/artifacts/<id>.md` and return an ArtifactPointer.
    * Otherwise, return the content unchanged.
+   *
+   * Threshold and pointer.bytes use Buffer.byteLength(content, 'utf8'),
+   * not content.length — the latter counts UTF-16 code units and would
+   * undercount astral content (emoji, certain CJK), letting genuinely
+   * over-budget output slip past the threshold.
    *
    * The id is deterministic (SHA-256 hex prefix) so duplicate large outputs
    * don't bloat disk — a second store of identical content overwrites the same file.
@@ -84,7 +89,8 @@ export class MarkdownStore {
     content: string,
     opts: { maxBytes: number },
   ): Promise<string | ArtifactPointer> {
-    if (content.length <= opts.maxBytes) {
+    const byteLen = Buffer.byteLength(content, 'utf8');
+    if (byteLen <= opts.maxBytes) {
       return content;
     }
     const id = contentId(content);
@@ -96,12 +102,19 @@ export class MarkdownStore {
       kind: 'artifact',
       id,
       path: artifactPath,
-      bytes: content.length,
+      bytes: byteLen,
       preview: content.slice(0, 200),
     };
   }
 
-  /** Read the full content of an artifact given its pointer. */
+  /**
+   * Read the full content of an artifact given its pointer.
+   *
+   * Use this method, not `read()`, for artifact paths — artifact files
+   * have no frontmatter block, so `read()` would feed them through
+   * `parseRecord` and silently misparse any artifact whose content
+   * happens to start with `---\n`.
+   */
   async readArtifact(pointer: ArtifactPointer): Promise<string> {
     const abs = join(this.root, pointer.path);
     return readFile(abs, 'utf8');

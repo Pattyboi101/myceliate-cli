@@ -127,4 +127,24 @@ describe('MarkdownStore', () => {
     const retrieved = await s.readArtifact(ptr);
     expect(retrieved).toBe(largeText);
   });
+
+  it('storeArtifact threshold and pointer.bytes use UTF-8 byte length, not code units', async () => {
+    const s = new MarkdownStore(tmp);
+    // '🦆' is a surrogate pair: length === 2, byteLength === 4.
+    // 200 ducks => length 400, byte length 800.
+    const emojiText = '🦆'.repeat(200);
+    const codeUnits = emojiText.length;
+    const utf8Bytes = Buffer.byteLength(emojiText, 'utf8');
+    expect(codeUnits).toBe(400);
+    expect(utf8Bytes).toBe(800);
+
+    // maxBytes=500 sits between code-unit count (400) and UTF-8 byte count (800).
+    // Buggy length-based threshold would falsely return the content unchanged.
+    // Correct byte-based threshold offloads.
+    const result = await s.storeArtifact(emojiText, { maxBytes: 500 });
+    expect(typeof result).toBe('object');
+    const ptr = result as ArtifactPointer;
+    expect(ptr.bytes).toBe(utf8Bytes);
+    expect(ptr.bytes).not.toBe(codeUnits);
+  });
 });

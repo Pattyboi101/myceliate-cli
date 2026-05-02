@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --dir tests/integration",
+    "test:integration": "vitest run tests/integration",
     "lint": "biome check .",
     "format": "biome format --write .",
     "queue:worker": "tsx src/queue/worker.ts",

@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { parseV3Chunk, V3StreamState } from '../../../src/adapters/v3/parser.js';
+import { describe, expect, it } from 'vitest';
 import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
+import { V3StreamState, parseV3Chunk } from '../../../src/adapters/v3/parser.js';
 
 function collect(state: V3StreamState, jsonChunks: string[]): StreamEvent[] {
   const out: StreamEvent[] = [];
@@ -36,8 +36,27 @@ describe('parseV3Chunk', () => {
   it('accumulates a tool_call across delta chunks and emits once on completion', () => {
     const s = new V3StreamState();
     const events = collect(s, [
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"pa' } }] } }] }),
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'th":"a.txt"}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_1',
+                  type: 'function',
+                  function: { name: 'read_file', arguments: '{"pa' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      JSON.stringify({
+        choices: [
+          { delta: { tool_calls: [{ index: 0, function: { arguments: 'th":"a.txt"}' } }] } },
+        ],
+      }),
       JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }),
     ]);
     expect(events).toContainEqual({
@@ -52,7 +71,14 @@ describe('parseV3Chunk', () => {
     const s = new V3StreamState();
     const events = collect(s, [
       JSON.stringify({ choices: [{ delta: { content: 'hi' } }] }),
-      JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2, completion_tokens_details: { reasoning_tokens: 5 } } }),
+      JSON.stringify({
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 2,
+          completion_tokens_details: { reasoning_tokens: 5 },
+        },
+      }),
     ]);
     expect(events.at(-1)).toEqual({
       type: 'done',

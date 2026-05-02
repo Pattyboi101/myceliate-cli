@@ -1,7 +1,7 @@
+import { type FetchInit, openSseConnection, parseSseStream } from '../../transport/sseClient.js';
 import type { ChatRequest, DeepSeekClient } from '../DeepSeekClient.js';
 import type { Message } from '../messages.js';
 import type { StreamEvent } from '../streamEvent.js';
-import { openSseConnection, parseSseStream, type FetchInit } from '../../transport/sseClient.js';
 import { V3StreamState, parseV3Chunk } from './parser.js';
 
 type SseOpener = (init: FetchInit) => Promise<AsyncIterable<Uint8Array>>;
@@ -29,7 +29,12 @@ export class V3Adapter implements DeepSeekClient {
         ? {
             tools: req.tools.map((t) => ({
               type: 'function',
-              function: { name: t.name, description: t.description, parameters: t.parameters, strict: req.strict },
+              function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.parameters,
+                strict: req.strict,
+              },
             })),
             tool_choice: 'auto',
           }

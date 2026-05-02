@@ -85,7 +85,10 @@ export function* parseV3Chunk(state: V3StreamState, json: string): Generator<Str
     state.pending.clear();
   }
 
-  if (chunk.usage !== undefined && (choice?.finish_reason === 'stop' || choice?.finish_reason === 'tool_calls')) {
+  if (
+    chunk.usage !== undefined &&
+    (choice?.finish_reason === 'stop' || choice?.finish_reason === 'tool_calls')
+  ) {
     yield {
       type: 'done',
       usage: {

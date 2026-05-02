@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
-import { V3Adapter } from '../../../src/adapters/v3/adapter.js';
+import { describe, expect, it, vi } from 'vitest';
 import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
+import { V3Adapter } from '../../../src/adapters/v3/adapter.js';
 
 const encoder = new TextEncoder();
 
@@ -28,7 +28,8 @@ describe('V3Adapter', () => {
       messages: [{ role: 'user', content: 'hi' }],
       thinking: true,
       strict: true,
-    })) events.push(e);
+    }))
+      events.push(e);
     expect(events.map((e) => e.type)).toEqual(['reasoning_delta', 'content_delta', 'done']);
     expect(opener).toHaveBeenCalledOnce();
     const sentBody = opener.mock.calls[0]![0].body as { stream: boolean; messages: unknown[] };

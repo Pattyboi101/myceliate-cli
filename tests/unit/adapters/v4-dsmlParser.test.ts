@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { DsmlParser } from '../../../src/adapters/v4/dsmlParser.js';
 
 describe('DsmlParser — happy path', () => {
@@ -45,6 +45,11 @@ describe('DsmlParser — happy path', () => {
       ...p.feed('<param key="paths" string="false">["a","b"]</param>'),
       ...p.feed('</call></|DSML|tool_calls>'),
     ];
-    expect(events).toContainEqual({ type: 'tool_call', id: 't', name: 'x', args: { paths: ['a', 'b'] } });
+    expect(events).toContainEqual({
+      type: 'tool_call',
+      id: 't',
+      name: 'x',
+      args: { paths: ['a', 'b'] },
+    });
   });
 });

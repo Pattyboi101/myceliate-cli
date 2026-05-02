@@ -6,7 +6,12 @@ const CLOSE_BLOCK = '</|DSML|tool_calls>';
 type Mode = 'content' | 'block';
 
 type PendingParam = { key: string; isString: boolean; value: string };
-type PendingCall = { id: string; name: string; params: PendingParam[]; current: PendingParam | null };
+type PendingCall = {
+  id: string;
+  name: string;
+  params: PendingParam[];
+  current: PendingParam | null;
+};
 
 export class DsmlParser {
   private buffer = '';
@@ -95,7 +100,8 @@ export class DsmlParser {
       } else if (tag === '</call>') {
         if (this.call) {
           const args: Record<string, unknown> = {};
-          for (const p of this.call.params) args[p.key] = p.isString ? p.value : safeJsonParse(p.value);
+          for (const p of this.call.params)
+            args[p.key] = p.isString ? p.value : safeJsonParse(p.value);
           out.push({ type: 'tool_call', id: this.call.id, name: this.call.name, args });
           this.call = null;
         }

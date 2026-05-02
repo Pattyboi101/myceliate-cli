@@ -1,6 +1,6 @@
 import type { ToolCall } from '../messages.js';
+import { isContentDelta, isToolCall } from '../streamEvent.js';
 import { DsmlParser } from './dsmlParser.js';
-import { isToolCall, isContentDelta } from '../streamEvent.js';
 
 export type LeakResult = { cleanedText: string; toolCalls: ToolCall[] };
 

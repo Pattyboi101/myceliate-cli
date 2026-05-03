@@ -4,10 +4,10 @@
   "description": "Autonomous DeepSeek V4 CLI agent. Thin Agent / Fat Platform architecture.",
   "type": "module",
   "bin": {
-    "myc": "dist/index.js"
+    "myceliate": "bin/myceliate.mjs"
   },
   "main": "dist/index.js",
-  "files": ["dist", "README.md", "CLAUDE.md"],
+  "files": ["bin", "dist", "src", "README.md", "CLAUDE.md"],
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",

@@ -61,6 +61,7 @@ async function main(): Promise<void> {
     approvalRequest: null,
     phase: 'awaiting_input',
     turns: [],
+    toolCalls: [],
   };
   const banner = {
     model: onboarding.model,
@@ -117,11 +118,44 @@ async function main(): Promise<void> {
           rerender({ ...state, content: contentText });
         } else if (ev.type === 'tool_call') {
           logger.info({ event: 'tool_call', name: ev.name, id: ev.id });
+          rerender({
+            ...state,
+            toolCalls: [
+              ...state.toolCalls,
+              { id: ev.id, name: ev.name, args: ev.args, status: 'running' },
+            ],
+          });
+        } else if (ev.type === 'tool_result') {
+          logger.info({
+            event: 'tool_result',
+            id: ev.id,
+            status: ev.status,
+            durationMs: ev.durationMs,
+          });
+          rerender({
+            ...state,
+            toolCalls: state.toolCalls.map((c) =>
+              c.id === ev.id
+                ? {
+                    ...c,
+                    status: ev.status,
+                    durationMs: ev.durationMs,
+                    ...(ev.preview ? { preview: ev.preview } : {}),
+                    ...(ev.cause
+                      ? { error: ev.cause instanceof Error ? ev.cause.message : String(ev.cause) }
+                      : {}),
+                  }
+                : c,
+            ),
+          });
         } else if (ev.type === 'turn_complete') {
+          // F4 reset, extended: clear per-turn buffers AND toolCalls so each turn's
+          // card list shows only the current turn's calls (not a growing stack across
+          // a multi-turn ReAct flow).
           reasoningText = '';
           contentText = '';
           reasonStartedAt = Date.now();
-          rerender({ ...state, reasoning: null, content: '' });
+          rerender({ ...state, reasoning: null, content: '', toolCalls: [] });
         } else if (ev.type === 'error') {
           logger.error({
             event: 'stream_error',
@@ -149,6 +183,7 @@ async function main(): Promise<void> {
           approvalRequest: null,
           phase: 'awaiting_input',
           turns,
+          toolCalls: [],
         });
       },
       readNextPrompt: async () =>
@@ -162,6 +197,7 @@ async function main(): Promise<void> {
             approvalRequest: null,
             phase: 'streaming',
             turns: state.turns,
+            toolCalls: [],
           });
           return text;
         }),

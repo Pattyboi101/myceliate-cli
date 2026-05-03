@@ -3,6 +3,7 @@ import React from 'react';
 // tests/unit/ui/App.test.tsx
 import { describe, expect, it } from 'vitest';
 import { App, type AppState } from '../../../src/ui/App.js';
+import type { ToolCallCardState } from '../../../src/ui/ToolCallCard.js';
 
 it('renders <PromptInput> when phase is awaiting_input', () => {
   const state: AppState = {
@@ -12,6 +13,7 @@ it('renders <PromptInput> when phase is awaiting_input', () => {
     approvalRequest: null,
     phase: 'awaiting_input',
     turns: [],
+    toolCalls: [],
   };
   const { lastFrame } = render(<App state={state} />);
   // PromptInput renders the gray block-cursor glyph as its visible marker.
@@ -26,6 +28,7 @@ it('hides <PromptInput> while streaming', () => {
     approvalRequest: null,
     phase: 'streaming',
     turns: [],
+    toolCalls: [],
   };
   const { lastFrame } = render(<App state={state} />);
   expect(lastFrame()).not.toContain('▎');
@@ -40,6 +43,7 @@ describe('App', () => {
       approvalRequest: null,
       phase: 'streaming',
       turns: [],
+      toolCalls: [],
     };
     const { lastFrame } = render(<App state={state} />);
     const f = lastFrame() ?? '';
@@ -55,6 +59,7 @@ describe('App', () => {
       approvalRequest: { command: 'rm -rf x', cwd: '/x', reason: 'why' },
       phase: 'streaming',
       turns: [],
+      toolCalls: [],
     };
     const { lastFrame } = render(<App state={state} />);
     expect(lastFrame()).toContain('Approval required');
@@ -72,6 +77,7 @@ describe('App', () => {
       approvalRequest: null,
       phase: 'streaming',
       turns: [],
+      toolCalls: [],
     };
     const { lastFrame, stdin } = render(<App state={state} />);
     // Wait for Ink's useEffect to register the 'readable' listener via setRawMode.
@@ -102,6 +108,7 @@ describe('App', () => {
       approvalRequest: null,
       phase: 'streaming',
       turns: [],
+      toolCalls: [],
     };
     const { lastFrame, rerender } = render(<App state={state} />);
     const f1 = lastFrame() ?? '';
@@ -113,4 +120,28 @@ describe('App', () => {
     // Same duration on re-render — frozen, not drifting.
     expect(f2).toMatch(/3\.4s/);
   });
+});
+
+it('renders ToolCallCard for each entry in state.toolCalls', () => {
+  const toolCall: ToolCallCardState = {
+    id: 't1',
+    name: 'bash',
+    args: { command: 'ls' },
+    status: 'completed',
+    durationMs: 25,
+    preview: 'foo.ts',
+  };
+  const state: AppState = {
+    userInput: 'go',
+    reasoning: null,
+    content: '',
+    approvalRequest: null,
+    phase: 'streaming',
+    turns: [],
+    toolCalls: [toolCall],
+  };
+  const { lastFrame } = render(<App state={state} />);
+  expect(lastFrame()).toContain('bash');
+  expect(lastFrame()).toContain('25ms');
+  expect(lastFrame()).toContain('foo.ts');
 });

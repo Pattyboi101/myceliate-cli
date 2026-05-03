@@ -70,4 +70,27 @@ describe('zodToStrictJsonSchema', () => {
     const s = z.object({ pair: z.tuple([z.string()]) });
     expect(() => zodToStrictJsonSchema(s)).toThrow(/Unsupported Zod schema/i);
   });
+
+  // Phase 14 review m7 fix: ZodDefault was added to support bash tool's cwd/timeoutMs
+  // (which couldn't be .optional() per R3). The branch was previously only exercised
+  // transitively via tool.inputSchema.parse(); these tests lock the JSON Schema
+  // generation path that runs at tools.register() time.
+  it('unwraps ZodDefault fields as required with inner type', () => {
+    const s = z.object({
+      cwd: z.string().default(''),
+      timeoutMs: z.number().default(0),
+    });
+    const json = zodToStrictJsonSchema(s);
+    expect(json).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      required: ['cwd', 'timeoutMs'],
+      properties: { cwd: { type: 'string' }, timeoutMs: { type: 'number' } },
+    });
+  });
+
+  it('still refuses ZodDefault wrapping ZodOptional (R3 enforced through unwrap chain)', () => {
+    const s = z.object({ x: z.string().optional().default('y') });
+    expect(() => zodToStrictJsonSchema(s)).toThrow(/optional/i);
+  });
 });

@@ -67,4 +67,23 @@ describe('bashTool', () => {
     );
     expect(queue.add).toHaveBeenCalledOnce();
   });
+
+  // Phase 14 review m6 fix: the `fakeQueue('fail')` variant existed but was
+  // unused. Locks the queue/worker-explosion path so the bash tool's rejection
+  // bubbles up to runReactLoop's catch and yields tool_result.status='failed'
+  // (NOT 'rejected' — only HITL-prefixed throws map to rejected per Task 92).
+  it('rethrows when waitUntilFinished rejects (worker exploded)', async () => {
+    const hitl = new HitlGate({ requestApproval: vi.fn() });
+    const queue = fakeQueue('fail');
+    const tool = createBashTool({
+      hitl,
+      queue: queue as never,
+      queueEvents: {} as never,
+      defaultTimeoutMs: 1000,
+    });
+    await expect(
+      tool.run({ command: 'echo ok' }, { cwd: '/tmp', abort: new AbortController().signal }),
+    ).rejects.toThrow(/worker exploded/);
+    expect(queue.add).toHaveBeenCalledOnce();
+  });
 });

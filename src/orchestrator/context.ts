@@ -1,0 +1,80 @@
+// src/orchestrator/context.ts
+import { spawn } from 'node:child_process';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { loadProjectClaudeMd } from '../memory/claudeMd.js';
+
+export type SessionContext = {
+  cwd: string;
+  claudeMd: string;
+  memoryDir: string;
+  /** Output of `git status --porcelain` from cwd. Empty string if not a git repo or git unavailable. */
+  gitStatus: string;
+  /** Sorted top-level directory entries (filenames only). Empty array on read failure. */
+  dirEntries: string[];
+};
+
+/**
+ * Run a command with spawn and collect stdout as a string.
+ * Resolves to empty string on any error (non-zero exit, ENOENT, etc.)
+ */
+function spawnCollect(cmd: string, args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let proc: ReturnType<typeof spawn>;
+    try {
+      proc = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      resolve('');
+      return;
+    }
+    if (!proc.stdout) {
+      resolve('');
+      return;
+    }
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+    });
+    proc.on('close', (code) => {
+      // git exits non-zero (e.g. 128) when not a repo; treat as empty
+      resolve(code === 0 ? stdout.trim() : '');
+    });
+    proc.on('error', () => {
+      resolve('');
+    });
+  });
+}
+
+/**
+ * List top-level entries in `cwd`, sorted alphabetically.
+ * Returns empty array if the directory does not exist or can't be read.
+ */
+async function listDirEntries(cwd: string): Promise<string[]> {
+  try {
+    const entries = await readdir(cwd);
+    return [...entries].sort();
+  } catch {
+    return [];
+  }
+}
+
+export async function senseContext(opts: {
+  cwd: string;
+  memoryDirName?: string;
+}): Promise<SessionContext> {
+  const memoryDir = join(opts.cwd, opts.memoryDirName ?? '.myceliate');
+
+  const [claudeMd, gitStatus, dirEntries] = await Promise.all([
+    loadProjectClaudeMd(opts.cwd),
+    spawnCollect('git', ['status', '--porcelain'], opts.cwd),
+    listDirEntries(opts.cwd),
+  ]);
+
+  return {
+    cwd: opts.cwd,
+    claudeMd,
+    memoryDir,
+    gitStatus,
+    dirEntries,
+  };
+}

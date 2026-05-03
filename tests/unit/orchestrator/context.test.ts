@@ -1,0 +1,73 @@
+// tests/unit/orchestrator/context.test.ts
+import { execSync } from 'node:child_process';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { senseContext } from '../../../src/orchestrator/context.js';
+
+let tmp: string;
+beforeEach(async () => {
+  tmp = await mkdtemp(join(tmpdir(), 'myc-ctx-'));
+});
+afterEach(async () => {
+  await rm(tmp, { recursive: true, force: true });
+});
+
+describe('senseContext', () => {
+  it('captures cwd, claudeMd, and memory dir', async () => {
+    await writeFile(join(tmp, 'CLAUDE.md'), '# rules', 'utf8');
+    await mkdir(join(tmp, '.myceliate'), { recursive: true });
+    const ctx = await senseContext({ cwd: tmp });
+    expect(ctx.cwd).toBe(tmp);
+    expect(ctx.claudeMd).toBe('# rules');
+    expect(ctx.memoryDir).toBe(join(tmp, '.myceliate'));
+  });
+
+  it('handles missing CLAUDE.md gracefully', async () => {
+    const ctx = await senseContext({ cwd: tmp });
+    expect(ctx.claudeMd).toBe('');
+  });
+
+  it('gitStatus populates from a real git repo with dirty files', async () => {
+    // init a real git repo with a dirty file
+    execSync('git init', { cwd: tmp, stdio: 'ignore' });
+    execSync('git config user.email "test@test.com"', { cwd: tmp, stdio: 'ignore' });
+    execSync('git config user.name "Test"', { cwd: tmp, stdio: 'ignore' });
+    await writeFile(join(tmp, 'dirty.txt'), 'dirty content', 'utf8');
+    const ctx = await senseContext({ cwd: tmp });
+    // dirty.txt should appear in status
+    expect(ctx.gitStatus).toContain('dirty.txt');
+  });
+
+  it('gitStatus is empty string when cwd is not a git repo', async () => {
+    // tmp is already a non-git dir (no git init)
+    const ctx = await senseContext({ cwd: tmp });
+    expect(ctx.gitStatus).toBe('');
+  });
+
+  it('dirEntries captures top-level files alphabetically', async () => {
+    await writeFile(join(tmp, 'beta.ts'), '', 'utf8');
+    await writeFile(join(tmp, 'alpha.ts'), '', 'utf8');
+    await mkdir(join(tmp, 'subdir'), { recursive: true });
+    const ctx = await senseContext({ cwd: tmp });
+    // should be sorted, filenames only
+    expect(ctx.dirEntries).toEqual(['alpha.ts', 'beta.ts', 'subdir']);
+  });
+
+  it('dirEntries returns empty array when cwd does not exist', async () => {
+    const nonexistent = join(tmp, 'does-not-exist');
+    const ctx = await senseContext({ cwd: nonexistent });
+    expect(ctx.dirEntries).toEqual([]);
+  });
+
+  it('senseContext does not throw on any failure mode (graceful all the way down)', async () => {
+    const nonexistent = join(tmp, 'no-such-dir');
+    await expect(senseContext({ cwd: nonexistent })).resolves.toMatchObject({
+      cwd: nonexistent,
+      claudeMd: '',
+      gitStatus: '',
+      dirEntries: [],
+    });
+  });
+});

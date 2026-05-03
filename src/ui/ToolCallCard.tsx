@@ -34,7 +34,16 @@ function summariseArgs(args: unknown): string {
   return typeof first === 'string' ? first : JSON.stringify(obj);
 }
 
-export function ToolCallCard({ card }: { card: ToolCallCardState }): React.JSX.Element {
+const COLLAPSED_LINES = 5;
+
+export function ToolCallCard({
+  card,
+  expanded = false,
+}: { card: ToolCallCardState; expanded?: boolean }): React.JSX.Element {
+  const previewLines = card.preview ? card.preview.split('\n') : [];
+  const visibleLines = expanded ? previewLines : previewLines.slice(0, COLLAPSED_LINES);
+  const hiddenCount = previewLines.length - visibleLines.length;
+
   return (
     <Box flexDirection="column" marginY={1} borderStyle="round" paddingX={1}>
       <Box>
@@ -45,9 +54,15 @@ export function ToolCallCard({ card }: { card: ToolCallCardState }): React.JSX.E
           <Text color="gray">{`  ${card.durationMs}ms`}</Text>
         )}
       </Box>
-      {card.status === 'completed' && card.preview && (
-        <Box marginTop={1}>
-          <Text color="gray">{card.preview}</Text>
+      {card.status === 'completed' && previewLines.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          {visibleLines.map((line, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: stable lines.
+            <Text key={i} color="gray">
+              {line}
+            </Text>
+          ))}
+          {hiddenCount > 0 && <Text color="gray">{`… ${hiddenCount} more lines`}</Text>}
         </Box>
       )}
       {(card.status === 'failed' || card.status === 'rejected') && card.error && (

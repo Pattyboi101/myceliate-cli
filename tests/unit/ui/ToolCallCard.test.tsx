@@ -59,4 +59,37 @@ describe('ToolCallCard', () => {
     const { lastFrame } = render(<ToolCallCard card={card} />);
     expect(lastFrame()).toContain('rejected');
   });
+
+  it('renders only the first N lines of a long preview when collapsed', () => {
+    const lines = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n');
+    const card: ToolCallCardState = {
+      id: 't1',
+      name: 'bash',
+      args: { command: 'seq 50' },
+      status: 'completed',
+      durationMs: 10,
+      preview: lines,
+    };
+    const { lastFrame } = render(<ToolCallCard card={card} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('line 0');
+    expect(frame).toContain('line 4');
+    // 5-line collapsed view default — line 5 onwards is hidden.
+    expect(frame).not.toContain('line 49');
+    expect(frame).toContain('… 45 more lines');
+  });
+
+  it('renders the full preview when expanded prop is true', () => {
+    const lines = Array.from({ length: 10 }, (_, i) => `line ${i}`).join('\n');
+    const card: ToolCallCardState = {
+      id: 't1',
+      name: 'bash',
+      args: { command: 'seq 10' },
+      status: 'completed',
+      durationMs: 10,
+      preview: lines,
+    };
+    const { lastFrame } = render(<ToolCallCard card={card} expanded />);
+    expect(lastFrame()).toContain('line 9');
+  });
 });

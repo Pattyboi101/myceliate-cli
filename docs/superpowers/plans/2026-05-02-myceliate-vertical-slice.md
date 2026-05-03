@@ -5344,6 +5344,30 @@ git commit -m "docs: manual smoke verification checklist"
 
 ---
 
+> **Phase 11 review-iteration note:** Phase 11 (Tasks 40–41) shipped via single implementer subagent (commits `97daa20`, `f2bfa23`), then two-stage parallel review (spec compliance + code quality). Spec review returned `PASS`; code quality returned `MINOR FIXES RECOMMENDED`. Three fixes applied inline (`570338d`). Treat the code in `src/index.ts` and `docs/MANUAL_SMOKE.md` as the source of truth.
+>
+> **Pre-approved plan deviations (applied during implementation):**
+>
+> - **`ev.cause.message` typing fix (`src/index.ts:101`):** plan line 5249 wrote `ev.cause.message` on `cause: unknown` (`src/adapters/streamEvent.ts:13`). Replaced with `ev.cause instanceof Error ? ev.cause.message : String(ev.cause)` for strict-mode compliance.
+> - **Explicit `cwd` thread (`src/index.ts:81`):** plan invocation didn't pass `cwd` to `runReactLoop`. Internally `reactLoop.ts:79` defaults to `process.cwd()`, so the explicit pass is cosmetic for behaviour, but the entry-point file is the top-level dependency-injection manifest — explicit threading documents intent and is robust to future internal changes.
+> - **`engine.snapshot().slice(1)` (`src/index.ts:110`):** plan's final `for (const m of engine.snapshot()) await conversation.appendTurn(m)` would have written the initial user turn twice (already written at `src/index.ts:55`). `.slice(1)` skips index 0 — the duplicate — while preserving the early write as crash-safety: if the loop crashes mid-stream, the user prompt is still on disk. Tradeoff (slightly uglier slice vs lost initial-turn record) was decided in favour of crash-safety because Markdown files are this architecture's definitive source of truth.
+>
+> **Two-stage review fixes applied inline (commit `570338d`):**
+>
+> - **M1 — `try/finally` around the loop (`src/index.ts:75-114`):** code-quality reviewer flagged that `QueryEngine.prepareRequest` can throw `CompactionRefusal` when the working budget exceeds 95% and layers 4–5 are deferred (per R10 + R12). Without `try/finally` that throw propagates uncaught through the `for await`, bypasses `ink.unmount()`, and lets `console.error` in `main().catch` write to stderr while Ink is still mounted — ANSI corruption, U4 violation. The Compaction smoke test (`WORKING_TOKEN_BUDGET=2000`) makes this a realistic path, not theoretical. Wrapped the loop + post-loop snapshot flush in `try`, with `await logger.flush()` and `ink.unmount()` in `finally`. On crash mid-loop, unflushed assistant turns are lost but the initial user turn (already written) is preserved — consistent with FIX #3's stance.
+> - **m1 — Module comment placement (`src/index.ts:1`):** Biome's import-sort moved `node:crypto` and `node:path` above the `// src/index.ts` comment on initial commit. Moved comment back to line 1 to match every other module's header convention.
+> - **m2 — HITL smoke items annotated as `[DEFERRED]` (`docs/MANUAL_SMOKE.md:26-29`):** the three HITL items required a registered bash tool to trigger `HitlGate.checkBash`, but only read/write/list/grep are wired in v1 and none route through the gate. Annotation prevents false failures during manual smoke. The items remain in the doc as v2 reminders.
+>
+> Tests: 278 unit + 2 skipped integration unchanged through the review-fix iteration. Typecheck and lint clean. Build produces `dist/index.js` (5520 bytes after try/finally).
+>
+> **Phase 11 follow-ups deferred to v2:**
+>
+> - HITL gate has no caller in v1. No bash tool is registered in `index.ts`, and the BullMQ bash worker (`src/queue/worker.ts`) does not call `HitlGate.checkBash`. Wiring requires both a registered `bash` tool and the corresponding `runReactLoop` hook. The smoke checklist's HITL items are kept with `[DEFERRED]` markers as v2 reminders rather than removed.
+> - The `O(n²)` markdown re-parse per render (`<ContentStream>` re-instantiates `IncrementalMarkdownParser` per render via `useMemo([text])`) — already in Phase 10's deferred list, not introduced by Phase 11.
+> - Logger I/O failures silently drop the failing batch — already in Phase 10's deferred list.
+
+---
+
 ## Acceptance Criteria
 
 The vertical slice is complete when:

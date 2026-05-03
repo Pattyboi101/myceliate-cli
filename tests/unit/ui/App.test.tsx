@@ -1,7 +1,7 @@
-// tests/unit/ui/App.test.tsx
-import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
 import React from 'react';
+// tests/unit/ui/App.test.tsx
+import { describe, expect, it } from 'vitest';
 import { App, type AppState } from '../../../src/ui/App.js';
 
 describe('App', () => {

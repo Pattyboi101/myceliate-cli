@@ -1,7 +1,8 @@
 // src/ui/ContentStream.tsx
-import React, { useMemo } from 'react';
-import { IncrementalMarkdownParser } from './markdown/incrementalParser.js';
+import type React from 'react';
+import { useMemo } from 'react';
 import { MarkdownRenderer } from './markdown/MarkdownRenderer.js';
+import { IncrementalMarkdownParser } from './markdown/incrementalParser.js';
 
 export function ContentStream({ text }: { text: string }): React.JSX.Element {
   // Re-parse from scratch on each render. The parser itself is O(n); we accept

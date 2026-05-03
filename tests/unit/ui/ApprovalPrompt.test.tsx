@@ -1,7 +1,7 @@
-// tests/unit/ui/ApprovalPrompt.test.tsx
-import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
 import React from 'react';
+// tests/unit/ui/ApprovalPrompt.test.tsx
+import { describe, expect, it } from 'vitest';
 import { ApprovalPrompt } from '../../../src/ui/ApprovalPrompt.js';
 
 describe('ApprovalPrompt', () => {

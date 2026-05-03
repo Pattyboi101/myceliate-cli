@@ -1,5 +1,5 @@
 // src/util/logger.ts
-import { mkdir, appendFile } from 'node:fs/promises';
+import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -33,6 +33,8 @@ export function createLogger(opts: { logsDir: string; file?: string }): Logger {
     info: (e) => enqueue('info', e),
     warn: (e) => enqueue('warn', e),
     error: (e) => enqueue('error', e),
-    flush: async () => { await pending; },
+    flush: async () => {
+      await pending;
+    },
   };
 }

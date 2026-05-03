@@ -1,12 +1,16 @@
 // src/ui/markdown/MarkdownRenderer.tsx
 import { Box, Text } from 'ink';
-import React from 'react';
+import type React from 'react';
 import type { Block } from './incrementalParser.js';
 
-export function MarkdownRenderer({ blocks, open }: { blocks: readonly Block[]; open: Block | null }): React.JSX.Element {
+export function MarkdownRenderer({
+  blocks,
+  open,
+}: { blocks: readonly Block[]; open: Block | null }): React.JSX.Element {
   return (
     <Box flexDirection="column">
       {blocks.map((b, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: completed blocks are append-only and never reordered
         <BlockView key={i} block={b} />
       ))}
       {open !== null && <BlockView block={open} dimmed />}

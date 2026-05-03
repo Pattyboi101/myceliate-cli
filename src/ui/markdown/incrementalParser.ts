@@ -29,7 +29,11 @@ export class IncrementalMarkdownParser {
               const hashes = m[1];
               const headingText = m[2];
               if (hashes === undefined || headingText === undefined) continue;
-              this.completed.push({ type: 'heading', level: hashes.length as 1 | 2 | 3 | 4 | 5 | 6, text: headingText });
+              this.completed.push({
+                type: 'heading',
+                level: hashes.length as 1 | 2 | 3 | 4 | 5 | 6,
+                text: headingText,
+              });
               this.buffer = this.buffer.slice(nl + 1).replace(/^\n+/, '');
               progress = true;
               continue;

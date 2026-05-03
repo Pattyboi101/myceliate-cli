@@ -1,6 +1,9 @@
 // tests/unit/ui/incrementalParser.test.ts
-import { describe, it, expect } from 'vitest';
-import { IncrementalMarkdownParser, type Block } from '../../../src/ui/markdown/incrementalParser.js';
+import { describe, expect, it } from 'vitest';
+import {
+  type Block,
+  IncrementalMarkdownParser,
+} from '../../../src/ui/markdown/incrementalParser.js';
 
 describe('IncrementalMarkdownParser', () => {
   it('locks a paragraph when a blank line follows', () => {
@@ -37,7 +40,7 @@ describe('IncrementalMarkdownParser', () => {
 
   it('is O(n): processing a 100k-char feed runs in linear time', () => {
     const p = new IncrementalMarkdownParser();
-    const big = ('para\n\n').repeat(20_000); // 120k chars, 20k completed blocks
+    const big = 'para\n\n'.repeat(20_000); // 120k chars, 20k completed blocks
     const t0 = performance.now();
     p.feed(big);
     const elapsed = performance.now() - t0;

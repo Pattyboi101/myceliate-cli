@@ -7,7 +7,18 @@ import { ApprovalPrompt } from './ApprovalPrompt.js';
 import { ContentStream } from './ContentStream.js';
 import { ReasoningBlock } from './ReasoningBlock.js';
 
-export type ReasoningState = { text: string; phase: 'streaming' | 'complete'; startedAtMs: number };
+export type ReasoningState = {
+  text: string;
+  phase: 'streaming' | 'complete';
+  startedAtMs: number;
+  /**
+   * F4: set when the reasoning phase flips from `streaming` to `complete`.
+   * Without this, App's render-time `Date.now() - startedAtMs` calculation kept
+   * ticking up while the answer streamed (a 3 s reasoning displayed as 8 s by
+   * the time the answer finished).
+   */
+  endedAtMs?: number;
+};
 
 export type AppState = {
   userInput: string;
@@ -37,7 +48,9 @@ export function App({
         <ReasoningBlock
           text={state.reasoning.text}
           phase={state.reasoning.phase}
-          durationMs={Date.now() - state.reasoning.startedAtMs}
+          durationMs={
+            (state.reasoning.endedAtMs ?? Date.now()) - state.reasoning.startedAtMs
+          }
           expanded={reasoningExpanded}
         />
       )}

@@ -62,7 +62,10 @@ async function main(): Promise<void> {
   };
   const ink = render(React.createElement(App, { state }));
 
-  const reasonStartedAt = Date.now();
+  // F4: per-turn state. Reset on every `turn_complete` boundary so turn 2's
+  // reasoning panel does not concatenate onto turn 1, and turn 1's frozen
+  // duration does not bleed into turn 2's timer.
+  let reasonStartedAt = Date.now();
   let reasoningText = '';
   let contentText = '';
 
@@ -88,12 +91,25 @@ async function main(): Promise<void> {
         };
       } else if (ev.type === 'content_delta') {
         if (state.reasoning && state.reasoning.phase === 'streaming') {
-          state = { ...state, reasoning: { ...state.reasoning, phase: 'complete' } };
+          // F4: freeze the reasoning duration on phase transition. Without
+          // endedAtMs, App's `Date.now() - startedAtMs` keeps ticking while
+          // the content streams.
+          state = {
+            ...state,
+            reasoning: { ...state.reasoning, phase: 'complete', endedAtMs: Date.now() },
+          };
         }
         contentText += ev.text;
         state = { ...state, content: contentText };
       } else if (ev.type === 'tool_call') {
         logger.info({ event: 'tool_call', name: ev.name, id: ev.id });
+      } else if (ev.type === 'turn_complete') {
+        // F4: reset per-turn buffers and timestamps. The next turn's
+        // reasoning_delta arrives with a clean slate.
+        reasoningText = '';
+        contentText = '';
+        reasonStartedAt = Date.now();
+        state = { ...state, reasoning: null, content: '' };
       } else if (ev.type === 'error') {
         // FIX #1: ev.cause is typed `unknown` in streamEvent.ts:13 — must narrow before reading .message, otherwise won't typecheck under strict mode.
         logger.error({

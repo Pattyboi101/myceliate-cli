@@ -1,5 +1,6 @@
 // src/memory/conversationLog.ts
 import type { Message } from '../adapters/messages.js';
+import { redactJsonLeaves, redactSecrets } from '../security/redactor.js';
 import type { MarkdownStore } from './markdownStore.js';
 
 /**
@@ -47,19 +48,26 @@ function renderTurn(m: Message): string {
     case 'system':
     case 'user':
     case 'assistant': {
-      // AssistantMessage.content may be null when the turn is purely a tool call.
-      const content = m.content ?? '';
+      // Task 81a: redact every cleartext channel before disk write so
+      // `.myceliate/history/<session>.md` carries the same R11 guarantees as
+      // egress payloads. Tool-call args are walked per-leaf (redactJsonLeaves)
+      // because the env_value pattern's greedy `\S+` would otherwise consume
+      // the closing `}` of the JSON envelope when applied to the assembled
+      // string — matching F1's adapter-level treatment.
+      const content = m.content ? redactSecrets(m.content) : '';
       const reasoning =
         m.role === 'assistant' && m.reasoning_content
-          ? `\n<details><summary>reasoning</summary>\n\n${m.reasoning_content}\n\n</details>\n`
+          ? `\n<details><summary>reasoning</summary>\n\n${redactSecrets(m.reasoning_content)}\n\n</details>\n`
           : '';
       const tools =
         m.role === 'assistant' && m.tool_calls?.length
-          ? `\n\n**tool_calls:** ${m.tool_calls.map((tc) => `${tc.name}(${JSON.stringify(tc.args)})`).join(', ')}\n`
+          ? `\n\n**tool_calls:** ${m.tool_calls
+              .map((tc) => `${tc.name}(${JSON.stringify(redactJsonLeaves(tc.args))})`)
+              .join(', ')}\n`
           : '';
       return `\n\n### ${m.role}\n\n${content}${reasoning}${tools}`;
     }
     case 'tool':
-      return `\n\n### tool (${m.result.tool_use_id}) ${m.result.is_error ? 'ERROR' : 'OK'}\n\n\`\`\`\n${m.result.content}\n\`\`\``;
+      return `\n\n### tool (${m.result.tool_use_id}) ${m.result.is_error ? 'ERROR' : 'OK'}\n\n\`\`\`\n${redactSecrets(m.result.content)}\n\`\`\``;
   }
 }

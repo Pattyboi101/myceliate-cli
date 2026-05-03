@@ -4,6 +4,7 @@ loadDotenv();
 
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { QueueEvents } from 'bullmq';
 import { render } from 'ink';
 import React from 'react';
 import type { DeepSeekClient } from './adapters/DeepSeekClient.js';
@@ -13,7 +14,12 @@ import { V4Adapter } from './adapters/v4/adapter.js';
 import { ConversationLog } from './memory/conversationLog.js';
 import { MarkdownStore } from './memory/markdownStore.js';
 import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
+import { getRedis } from './queue/connection.js';
+import { bashQueue } from './queue/queues.js';
 import { runReplSession } from './runtime/replSession.js';
+import { startWorker } from './runtime/workerLifecycle.js';
+import { type ApprovalRequest, type ApprovalResponse, HitlGate } from './security/hitlGate.js';
+import { createBashTool } from './tools/bash.js';
 import { grepTool } from './tools/grep.js';
 import { listDirTool } from './tools/listDir.js';
 import { readFileTool } from './tools/readFile.js';
@@ -45,10 +51,6 @@ async function main(): Promise<void> {
       : new V4Adapter({ apiKey: onboarding.apiKey, baseUrl });
 
   const tools = new ToolRegistry();
-  tools.register(readFileTool);
-  tools.register(writeFileTool);
-  tools.register(listDirTool);
-  tools.register(grepTool);
 
   // Phase 12.5: mount Ink straight into `awaiting_input` so the banner +
   // PromptInput render before the user submits anything. Removes the Clack
@@ -76,11 +78,49 @@ async function main(): Promise<void> {
       r(text);
     }
   };
+
+  // HITL UI bridge — mirrors the promptResolver pattern above.
+  // approvalResolver is set by HitlGate.requestApproval and resolved by onApprovalResponse.
+  let approvalResolver: ((r: ApprovalResponse) => void) | null = null;
+
   const ink = render(React.createElement(App, { state, banner, onPromptSubmit }));
   const rerender = (next: AppState): void => {
     state = next;
-    ink.rerender(React.createElement(App, { state, banner, onPromptSubmit }));
+    ink.rerender(React.createElement(App, { state, banner, onPromptSubmit, onApprovalResponse }));
   };
+
+  // onApprovalResponse must be defined after rerender (which it references).
+  // It is forward-referenced safely in the render/rerender calls above because
+  // the function is only called at runtime when the user responds to an approval prompt.
+  const onApprovalResponse = (r: ApprovalResponse): void => {
+    if (approvalResolver) {
+      const fn = approvalResolver;
+      approvalResolver = null;
+      fn(r);
+      rerender({ ...state, approvalRequest: null });
+    }
+  };
+
+  // Re-render with onApprovalResponse now that it is defined.
+  ink.rerender(React.createElement(App, { state, banner, onPromptSubmit, onApprovalResponse }));
+
+  const hitl = new HitlGate({
+    requestApproval: (req: ApprovalRequest) =>
+      new Promise<ApprovalResponse>((resolve) => {
+        approvalResolver = resolve;
+        rerender({ ...state, approvalRequest: req });
+      }),
+  });
+
+  const queue = bashQueue();
+  const queueEvents = new QueueEvents('bash', { connection: getRedis() });
+  const worker = startWorker();
+
+  tools.register(readFileTool);
+  tools.register(writeFileTool);
+  tools.register(listDirTool);
+  tools.register(grepTool);
+  tools.register(createBashTool({ hitl, queue, queueEvents, defaultTimeoutMs: 30_000 }));
 
   // Per-turn streaming buffers (reset on each `turn_complete` and at the top of
   // every REPL iteration via the runReplSession `onState` callback below).
@@ -212,6 +252,9 @@ async function main(): Promise<void> {
   } finally {
     await logger.flush();
     ink.unmount();
+    await queueEvents.close();
+    await queue.close();
+    await worker.shutdown();
   }
 }
 

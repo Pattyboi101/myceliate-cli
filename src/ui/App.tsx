@@ -48,9 +48,7 @@ export function App({
         <ReasoningBlock
           text={state.reasoning.text}
           phase={state.reasoning.phase}
-          durationMs={
-            (state.reasoning.endedAtMs ?? Date.now()) - state.reasoning.startedAtMs
-          }
+          durationMs={(state.reasoning.endedAtMs ?? Date.now()) - state.reasoning.startedAtMs}
           expanded={reasoningExpanded}
         />
       )}

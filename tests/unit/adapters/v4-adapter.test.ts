@@ -208,7 +208,9 @@ describe('V4Adapter', () => {
     // tool_call (one for the prefix, one for the suffix). Concatenated, the
     // cleaned text matches the original assertion ("plan  done").
     const reasoningTexts = events
-      .filter((e): e is Extract<typeof e, { type: 'reasoning_delta' }> => e.type === 'reasoning_delta')
+      .filter(
+        (e): e is Extract<typeof e, { type: 'reasoning_delta' }> => e.type === 'reasoning_delta',
+      )
       .map((e) => e.text);
     expect(reasoningTexts.join('')).toBe('plan  done');
     // No literal markup leaked into any reasoning_delta.
@@ -254,7 +256,9 @@ describe('V4Adapter', () => {
     expect(toolCalls[0]).toMatchObject({ id: 't', name: 'ls', args: {} });
     // No literal DSML markup leaked into any reasoning_delta.
     const reasoningTexts = events
-      .filter((e): e is Extract<typeof e, { type: 'reasoning_delta' }> => e.type === 'reasoning_delta')
+      .filter(
+        (e): e is Extract<typeof e, { type: 'reasoning_delta' }> => e.type === 'reasoning_delta',
+      )
       .map((e) => e.text);
     for (const t of reasoningTexts) {
       expect(t).not.toContain('<|DSML|');

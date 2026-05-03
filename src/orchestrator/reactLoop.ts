@@ -1,0 +1,122 @@
+// src/orchestrator/reactLoop.ts
+import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
+import type { ToolCall } from '../adapters/messages.js';
+import type { StreamEvent } from '../adapters/streamEvent.js';
+import type { MarkdownStore } from '../memory/markdownStore.js';
+import type { ToolRegistry } from '../tools/registry.js';
+import type { QueryEngine } from './QueryEngine.js';
+
+export type ReactLoopOptions = {
+  client: DeepSeekClient;
+  engine: QueryEngine;
+  tools: ToolRegistry;
+  model: string;
+  maxIterations?: number;
+  signal?: AbortSignal;
+  /** Working directory threaded to every tool invocation. */
+  cwd?: string;
+  /**
+   * If provided, oversized tool results are offloaded to this store.
+   * The conversation log gets a compact pointer instead of raw content.
+   */
+  artifactStore?: MarkdownStore;
+  /**
+   * Byte threshold for artifact offloading. Tool results larger than this
+   * are stored as artifacts. Default: 4096 (~1k tokens).
+   */
+  artifactThresholdBytes?: number;
+};
+
+export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<StreamEvent> {
+  const maxIters = opts.maxIterations ?? 25;
+  const artifactThreshold = opts.artifactThresholdBytes ?? 4096;
+
+  for (let iter = 0; iter < maxIters; iter++) {
+    const request = opts.engine.prepareRequest({
+      model: opts.model,
+      tools: opts.tools.definitions(),
+      thinking: true,
+      strict: true,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+
+    let assistantContent = '';
+    let assistantReasoning = '';
+    const pendingCalls: ToolCall[] = [];
+
+    for await (const ev of opts.client.stream(request)) {
+      yield ev;
+      switch (ev.type) {
+        case 'reasoning_delta':
+          assistantReasoning += ev.text;
+          break;
+        case 'content_delta':
+          assistantContent += ev.text;
+          break;
+        case 'tool_call':
+          pendingCalls.push({ id: ev.id, name: ev.name, args: ev.args });
+          break;
+        case 'done':
+        case 'error':
+          break;
+      }
+    }
+
+    // Append the assistant turn BEFORE the early return so history captures terminal turns.
+    opts.engine.appendAssistant({
+      content: assistantContent,
+      ...(assistantReasoning && pendingCalls.length > 0
+        ? { reasoning_content: assistantReasoning }
+        : {}),
+      ...(pendingCalls.length > 0 ? { tool_calls: pendingCalls } : {}),
+    });
+
+    if (pendingCalls.length === 0) return; // Terminal turn.
+
+    for (const call of pendingCalls) {
+      try {
+        const rawContent = await opts.tools.invoke(call.name, call.args, {
+          cwd: opts.cwd ?? process.cwd(),
+          ...(opts.signal ? { abort: opts.signal } : {}),
+        });
+
+        // Directive #4: offload oversized results to artifact store.
+        let content: string;
+        if (opts.artifactStore) {
+          const result = await opts.artifactStore.storeArtifact(rawContent, {
+            maxBytes: artifactThreshold,
+          });
+          if (typeof result === 'string') {
+            content = result;
+          } else {
+            // ArtifactPointer — build the compact pointer summary the LLM will see.
+            content =
+              `[artifact:${result.id}] ${result.bytes} bytes stored at ${result.path}\n` +
+              `preview: ${result.preview}`;
+          }
+        } else {
+          content = rawContent;
+        }
+
+        opts.engine.appendToolResult({
+          tool_use_id: call.id,
+          command: `${call.name} ${JSON.stringify(call.args)}`,
+          is_error: false,
+          content,
+        });
+      } catch (err) {
+        opts.engine.appendToolResult({
+          tool_use_id: call.id,
+          command: `${call.name} ${JSON.stringify(call.args)}`,
+          is_error: true,
+          content: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  yield {
+    type: 'error',
+    cause: new Error(`ReAct loop exceeded maxIterations=${maxIters}`),
+  };
+}

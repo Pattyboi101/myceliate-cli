@@ -1,10 +1,10 @@
+import { redactJsonLeaves, redactSecrets } from '../../security/redactor.js';
 import { openSseConnection, parseSseStream } from '../../transport/sseClient.js';
 import type { FetchInit } from '../../transport/sseClient.js';
 import type { ChatRequest, DeepSeekClient } from '../DeepSeekClient.js';
 import type { Message } from '../messages.js';
 import type { StreamEvent } from '../streamEvent.js';
 import { DsmlParser, escapeXml } from './dsmlParser.js';
-import { detectLeakedDsml } from './leakFallback.js';
 
 type SseOpener = (init: FetchInit) => Promise<AsyncIterable<Uint8Array>>;
 
@@ -56,15 +56,22 @@ export function buildRequestBody(req: ChatRequest): Record<string, unknown> {
  * For assistant turns with tool_calls, the tool_calls are re-serialised as
  * DSML markup appended to the content field for V4 context continuity.
  * Top-level export per Phase-2 lesson: helpers are module-level, not instance methods.
+ *
+ * R11: every outbound payload is run through `redactSecrets` before transmission.
+ * Tool-call args are leaf-redacted **before** DSML assembly so the env_value
+ * pattern's greedy `\S+` cannot run past a `</param>` close marker and corrupt
+ * the wire shape. The prefix `m.content` and `reasoning_content` are redacted
+ * as plain strings; tool result `content` is redacted on egress.
  */
 export function serializeMessage(m: Message): unknown {
   switch (m.role) {
     case 'system':
     case 'user':
-      return { role: m.role, content: m.content };
+      return { role: m.role, content: redactSecrets(m.content) };
     case 'assistant': {
-      const out: Record<string, unknown> = { role: 'assistant', content: m.content };
-      if (m.reasoning_content) out.reasoning_content = m.reasoning_content;
+      const prefix = m.content === null ? null : redactSecrets(m.content);
+      const out: Record<string, unknown> = { role: 'assistant', content: prefix };
+      if (m.reasoning_content) out.reasoning_content = redactSecrets(m.reasoning_content);
       if (m.tool_calls) {
         // V4 expects historical tool_calls re-serialized as DSML markup in content
         // for context continuity. This differs from V3 which uses a tool_calls array.
@@ -72,15 +79,19 @@ export function serializeMessage(m: Message): unknown {
         const dsml = `<|DSML|tool_calls>${m.tool_calls
           .map(
             (tc) =>
-              `<call id="${escapeXml(tc.id)}" name="${escapeXml(tc.name)}">${serializeArgs(tc.args)}</call>`,
+              `<call id="${escapeXml(tc.id)}" name="${escapeXml(tc.name)}">${serializeArgs(redactJsonLeaves(tc.args))}</call>`,
           )
           .join('')}</|DSML|tool_calls>`;
-        out.content = `${m.content ?? ''}${dsml}`;
+        out.content = `${prefix ?? ''}${dsml}`;
       }
       return out;
     }
     case 'tool':
-      return { role: 'tool', tool_call_id: m.result.tool_use_id, content: m.result.content };
+      return {
+        role: 'tool',
+        tool_call_id: m.result.tool_use_id,
+        content: redactSecrets(m.result.content),
+      };
   }
 }
 
@@ -129,6 +140,14 @@ export class V4Adapter implements DeepSeekClient {
     }
 
     const dsml = new DsmlParser();
+    // F6: persist a second DsmlParser for the reasoning channel. Stateless
+    // detectLeakedDsml() short-circuited whenever a single chunk lacked either
+    // marker, so DSML markup that legitimately leaked into reasoning_content
+    // and was split across SSE deltas fell through to raw passthrough — the
+    // markup leaked into user-visible reasoning, and the tool call was lost.
+    // The content channel already does this correctly; symmetric treatment for
+    // reasoning closes the gap.
+    const dsmlReasoning = new DsmlParser();
 
     // Phase-2 lesson: mid-stream failure is caught and yields error event, not throw.
     try {
@@ -147,11 +166,16 @@ export class V4Adapter implements DeepSeekClient {
 
         // Phase-2 lesson: explicit string length check instead of truthy (avoids dropping empty strings).
         if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
-          // Wire through leak fallback for vLLM/NIM servers that leak DSML into reasoning_content.
-          const { cleanedText, toolCalls } = detectLeakedDsml(delta.reasoning_content);
-          if (cleanedText.length > 0) yield { type: 'reasoning_delta', text: cleanedText };
-          for (const tc of toolCalls)
-            yield { type: 'tool_call', id: tc.id, name: tc.name, args: tc.args };
+          // F6: route reasoning_content through a persistent DsmlParser. The
+          // parser emits content-channel events; remap content_delta to
+          // reasoning_delta, pass tool_call through verbatim. Cross-chunk DSML
+          // leaks now buffer correctly inside the parser instead of falling
+          // through to raw passthrough as the previous stateless
+          // detectLeakedDsml call did.
+          for (const e of dsmlReasoning.feed(delta.reasoning_content)) {
+            if (e.type === 'content_delta') yield { type: 'reasoning_delta', text: e.text };
+            else yield e; // tool_call passes through
+          }
         }
 
         if (typeof delta?.content === 'string' && delta.content.length > 0) {
@@ -165,6 +189,11 @@ export class V4Adapter implements DeepSeekClient {
           // Drain any content-mode tail bytes the safe-prefix logic withheld. At
           // terminal finish, those bytes can't be a partial OPEN_BLOCK any more.
           for (const e of dsml.flush()) yield e;
+          // F6: drain the reasoning channel symmetrically.
+          for (const e of dsmlReasoning.flush()) {
+            if (e.type === 'content_delta') yield { type: 'reasoning_delta', text: e.text };
+            else yield e;
+          }
           const u = chunk.usage;
           yield {
             type: 'done',

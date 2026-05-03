@@ -41,8 +41,12 @@ describe('QueryEngine', () => {
   it('runs compaction when budget exceeds prune threshold', () => {
     // Design: workingBudget=800, prune at 50% (400 tokens), refuse at 95% (760 tokens).
     // 'x'.repeat(2_400) → 600 content tokens + overhead → ~612 tokens total (above 400, below 760).
-    // maxToolOutputChars=200 truncates the 2_400 char payload.
-    // protectedTailMessages=0 ensures no messages are protected from L1 pruning.
+    // maxToolOutputChars=200 would truncate the 2_400 char payload.
+    // protectedTailMessages=0 ensures no messages are protected from any layer.
+    // F3: post-fix, ANY non-'none' verdict runs L1+L2+L3 in order. With nothing
+    // protected, L3 (micro-compaction) overwrites L1's truncation marker — both
+    // ran, but L3 wins on tool result content. The assertion is loosened to
+    // accept either marker since the test's intent is that compaction kicked in.
     const q = new QueryEngine({
       systemPrompt: 'sys',
       workingBudget: 800,
@@ -65,7 +69,9 @@ describe('QueryEngine', () => {
     const req = q.prepareRequest({ model: 'm', tools: [], thinking: true, strict: true });
     const tool = req.messages.find((m) => m.role === 'tool');
     if (tool?.role !== 'tool') throw new Error('no tool');
-    expect(tool.result.content).toContain('[truncated');
+    // Either L1's truncation marker or L3's micro-compaction placeholder is acceptable —
+    // both indicate compaction fired. With protectedTailMessages=0, L3 wins (last layer).
+    expect(tool.result.content).toMatch(/\[truncated|\[micro-compacted/);
   });
 
   // --- Additional contract cases per lesson #5 ---
@@ -138,6 +144,77 @@ describe('QueryEngine', () => {
       content: 'x'.repeat(50_000),
     });
     q.appendUser('go');
+    expect(() => q.prepareRequest({ model: 'm', tools: [], thinking: true, strict: true })).toThrow(
+      expect.objectContaining({ kind: 'compaction_refused' }),
+    );
+  });
+
+  // F3: an oversized tool result that lands directly in the refuse band on
+  // entry must NOT short-circuit. R10 mandates layers 1–3 run before refusing.
+  // Here L1's truncation alone would bring the budget back under threshold,
+  // L3 then takes the cleanup pass — no CompactionRefusal is thrown.
+  it('runs L1+L2+L3 when entry verdict is refuse; recovers budget without throwing', () => {
+    const q = new QueryEngine({
+      systemPrompt: 'sys',
+      workingBudget: 1_000,
+      maxToolOutputChars: 400,
+      protectedTailMessages: 0,
+      thresholds: {
+        pruneThresholdPct: 50,
+        snipThresholdPct: 70,
+        microThresholdPct: 90,
+        refusalThresholdPct: 95,
+      },
+    });
+    // 10_000 chars → ~2500 tokens for content, plus command/overhead → well past 950 (refuse threshold).
+    q.appendToolResult({
+      tool_use_id: 't',
+      command: 'read_file big.log',
+      is_error: false,
+      content: 'x'.repeat(10_000),
+    });
+    let req: ReturnType<typeof q.prepareRequest> | undefined;
+    expect(() => {
+      req = q.prepareRequest({ model: 'm', tools: [], thinking: true, strict: true });
+    }).not.toThrow();
+    if (!req) throw new Error('req unset');
+    const tool = req.messages.find((m) => m.role === 'tool');
+    if (tool?.role !== 'tool') throw new Error('no tool');
+    // Compaction kicked in: either L1's truncation marker or L3's placeholder
+    // is acceptable evidence that the layers ran (with protectedTailMessages=0,
+    // L3 overwrites L1's output, but both fired in order).
+    expect(tool.result.content).toMatch(/\[truncated|\[micro-compacted/);
+  });
+
+  // F3: when L1+L2+L3 are all insufficient (e.g. very large protected tail),
+  // CompactionRefusal is still thrown — refusal is not skipped, just deferred
+  // until the layers have proven they cannot help.
+  it('throws CompactionRefusal when L1+L2+L3 cannot bring usage under threshold', () => {
+    const q = new QueryEngine({
+      systemPrompt: 'sys',
+      workingBudget: 1_000,
+      maxToolOutputChars: 200,
+      // protectedTailMessages high enough to shield ALL messages from L1/L3.
+      protectedTailMessages: 10,
+      // protectedTailTokens high enough to shield the tail from L2 too.
+      protectedTailTokens: 1_000_000,
+      thresholds: {
+        pruneThresholdPct: 50,
+        snipThresholdPct: 70,
+        microThresholdPct: 90,
+        refusalThresholdPct: 95,
+      },
+    });
+    // Three tool messages all inside the protected tail (history.length=3 ≤ protectedTailMessages=10).
+    // Each ~2500 tokens of content → total dominates the 1_000-token budget by ~7-8x.
+    for (let i = 0; i < 3; i++) {
+      q.appendToolResult({
+        tool_use_id: `t${i}`,
+        command: `read_file big${i}.log`,
+        is_error: false,
+        content: 'x'.repeat(10_000),
+      });
+    }
     expect(() => q.prepareRequest({ model: 'm', tools: [], thinking: true, strict: true })).toThrow(
       expect.objectContaining({ kind: 'compaction_refused' }),
     );

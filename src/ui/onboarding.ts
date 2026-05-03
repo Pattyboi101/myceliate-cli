@@ -1,5 +1,5 @@
 // src/ui/onboarding.ts
-import { cancel, intro, isCancel, outro, select, text } from '@clack/prompts';
+import { cancel, intro, isCancel, outro, password, select, text } from '@clack/prompts';
 
 export type OnboardingResult = {
   apiKey: string;
@@ -10,6 +10,19 @@ export type OnboardingResult = {
 
 async function promptText(opts: Parameters<typeof text>[0]): Promise<string> {
   const result = await text(opts);
+  if (isCancel(result)) {
+    cancel('Aborted.');
+    process.exit(0);
+  }
+  return result;
+}
+
+/**
+ * Masked variant of `promptText`. Used for secrets (API key) so keystrokes
+ * don't echo to the terminal and survive in scrollback / tmux / ssh recordings.
+ */
+async function promptPassword(opts: Parameters<typeof password>[0]): Promise<string> {
+  const result = await password(opts);
   if (isCancel(result)) {
     cancel('Aborted.');
     process.exit(0);
@@ -38,9 +51,8 @@ export async function runOnboarding(defaults: {
 
   const apiKey =
     defaults.apiKey ??
-    (await promptText({
+    (await promptPassword({
       message: 'DeepSeek API key',
-      placeholder: 'sk-...',
       validate: (v) => (v.length < 20 ? 'API key looks too short' : undefined),
     }));
 

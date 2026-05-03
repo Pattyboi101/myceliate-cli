@@ -54,4 +54,28 @@ describe('App', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(lastFrame() ?? '').not.toContain('long internal monologue');
   });
+
+  // F4: when endedAtMs is set, the rendered reasoning duration is frozen and
+  // does not drift across re-renders. Without this fix, App's render-time
+  // `Date.now() - startedAtMs` calculation kept ticking up while the answer
+  // streamed (3 s reasoning displayed as 8 s by the time content finished).
+  it('freezes reasoning duration when endedAtMs is set', async () => {
+    const startedAtMs = Date.now() - 3400; // 3.4 s ago
+    const endedAtMs = startedAtMs + 3400; // duration should display as 3.4 s
+    const state: AppState = {
+      userInput: 'do thing',
+      reasoning: { text: 'thinking', phase: 'complete', startedAtMs, endedAtMs },
+      content: '',
+      approvalRequest: null,
+    };
+    const { lastFrame, rerender } = render(<App state={state} />);
+    const f1 = lastFrame() ?? '';
+    expect(f1).toMatch(/3\.4s/);
+    // Wait long enough that a tick-up would be visible if the duration weren't frozen.
+    await new Promise((r) => setTimeout(r, 600));
+    rerender(<App state={state} />);
+    const f2 = lastFrame() ?? '';
+    // Same duration on re-render — frozen, not drifting.
+    expect(f2).toMatch(/3\.4s/);
+  });
 });

@@ -58,6 +58,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
           break;
         case 'done':
         case 'error':
+        case 'turn_complete':
           break;
       }
     }
@@ -72,6 +73,13 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
     });
 
     if (pendingCalls.length === 0) return; // Terminal turn.
+
+    // F4: signal the boundary between ReAct turns so consumers (UI) can reset
+    // per-turn state (reasoning text, started-at timestamp). Yielded BEFORE
+    // tool execution so the UI sees the transition immediately, not after the
+    // potentially-slow tool work. The next iteration's reasoning_delta then
+    // arrives with a clean per-turn buffer.
+    yield { type: 'turn_complete' };
 
     for (const call of pendingCalls) {
       try {

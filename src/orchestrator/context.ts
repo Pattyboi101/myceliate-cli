@@ -78,3 +78,25 @@ export async function senseContext(opts: {
     dirEntries,
   };
 }
+
+/** Cap on the number of cwd entries appended to the system prompt. */
+const DIR_ENTRIES_CAP = 50;
+
+/**
+ * Assemble the system prompt sent to the orchestrator. Combines the project's
+ * CLAUDE.md (or a fallback) with a "session ground truth" block carrying the
+ * porcelain git status and the cwd top-level listing — both of which
+ * `senseContext` runs on every session start but were previously thrown away.
+ *
+ * Pure helper so it can be unit-tested without driving `main()`'s side effects.
+ */
+export function buildSystemPrompt(ctx: SessionContext): string {
+  const base = ctx.claudeMd || 'You are myceliate, an autonomous CLI agent.';
+  const gitLine = ctx.gitStatus.length > 0 ? ctx.gitStatus : '(clean / not a repo)';
+  const entries = ctx.dirEntries;
+  const entryList =
+    entries.length > DIR_ENTRIES_CAP
+      ? `${entries.slice(0, DIR_ENTRIES_CAP).join(', ')}, ...`
+      : entries.join(', ');
+  return `${base}\n\n## session ground truth\ngit status:\n${gitLine}\n\ncwd entries: ${entryList}\n`;
+}

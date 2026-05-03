@@ -188,3 +188,5 @@ If you find yourself building any of the following, stop and surface the scope e
 - MCP server integration
 - FTS5 / SQLite memory store
 - Worker / QueueEvents dual Redis connection (R6) — `src/queue/worker.ts` currently shares the `getRedis()` singleton across `Worker` and `QueueEvents`. BullMQ recommends separate `Redis` instances to avoid blocking-read deadlocks under load. Acceptable for the v1 vertical slice; production-readiness needs the split.
+- Dangerous-pattern `\bsudo\b` over-trips on benign mentions (`echo "sudo manual"`, commit messages containing the word, log lines). Conservative v1 posture — better to require HITL approval on a false positive than miss a real escalation. v2 may tighten with start-of-line or argument-position anchors once usage data shows the false-positive volume.
+- Dangerous-pattern blocklist is case-sensitive (no `/i` flag). Uppercase shell aliases (`RM -RF /`, `SUDO ...`) don't trip. Same conservative-posture reasoning — fewer false positives on script content. Re-evaluate in v2 once we see whether case-insensitive coverage adds more signal than noise.

@@ -3778,6 +3778,38 @@ git commit -m "feat(compaction): layer 3 cache-aware micro-compactor (metadata-o
 
 ---
 
+> **Phase 8 review-iteration note:** During Phase 8 execution, code review surfaced cheap robustness wins applied beyond Tasks 24–28 specs (commit `df9120d`). Reviewer found NO Important bugs — all four of Patrick's priority asks (boundary off-by-ones, straddling, idempotence, metadata retention) came back clean. Suggestions folded in:
+>
+> - **Layer 1 idempotence guard.** `toolOutputPruner.ts` previously re-truncated already-truncated content on repeat invocations, drifting the recorded `original N chars` count downward each pass. Added a one-line guard `!content.includes('[truncated:')` so L1 is now strictly idempotent. Locked in by a regression test that runs the pruner twice and asserts byte-identical output.
+> - **`BudgetChecker` constructor validation.** Misconfigured threshold ladders (e.g. `pruneThresholdPct=90, snipThresholdPct=80`) previously produced confusing verdicts silently. Constructor now throws on non-decreasing ordering. Two regression tests cover swapped-pair cases; a third confirms equal adjacent thresholds are accepted.
+> - **`MICRO_COMPACTED_PLACEHOLDER` constant.** Magic string `'[micro-compacted]'` extracted as a top-level exported constant. Source uses it; tests can optionally import it.
+> - **Metadata-retention test.** Patrick specifically asked that `tool_use_id`, `command`, and `is_error` be strictly cloned (not mutated in place). New `microCompactor.test.ts` test asserts the original tool message's fields are unchanged after `microCompact`.
+> - **Zone-agnostic dedup documentation test.** `toolOutputPruner.test.ts` adds a test where two `read_file` duplicates both fall inside the protected tail; documents that dedup-newest-wins overrides zone protection.
+>
+> **Pre-flagged inline fixes during implementation** (commits `46ee902` … `e30b7a5`):
+>
+> - **Null guard for `AssistantMessage.content`.** Plan's `estimateTokens(m.content)` would fail strict TypeScript since `content` is `string | null`. Fixed with `m.content !== null ? estimateTokens(m.content) : 0`.
+> - **`history[i]!` non-null assertions replaced.** Plan had three `!` assertions in `snipper.ts`; replaced with safe destructuring (`const m = history[i]; if (!m) break/continue`) per the `noUncheckedIndexedAccess` discipline established in earlier phases.
+> - **`snipper.test.ts` arithmetic recalibration.** Plan's `protectedTailTokens: 50` for the "removes runs of 3+" test placed the protected boundary at index 2, leaving only one unprotected error — the test wouldn't have actually exercised the snipping path. Recomputed to 25 so the test catches what it claims to.
+>
+> Reviewer's verdicts on Patrick's four priority asks:
+>
+> - **Boundary off-by-ones** — clean across all three layers. `Math.max(0, length - tail)` clamps correctly; `i < protectedFrom` and `i >= protectedFrom` are mutually exclusive and exhaustive; `computeProtectedStart`'s backward accumulation correctly guarantees "at least N tokens protected".
+> - **Boundary straddling** — clean. Inner-loop guard `runEnd < protectedFrom` halts the run accumulation AT the boundary; protected sub-runs are kept intact; runs straddling the boundary collapse only the unprotected portion and produce well-formed output.
+> - **Idempotence** — L2 idempotent (system-marker insertion is structurally protected); L3 idempotent (semantically; new references each call but identical values); L1 now idempotent after the guard fix above.
+> - **Metadata retention** — clean. Object-literal allocation in `microCompactor.ts` ensures fresh result, primitives are value-copied. Original message is provably unmutated (test added).
+>
+> Tests: 190 → 229 unit (+39 across this phase). Treat the code under `src/util/`, `src/orchestrator/compaction/`, and tests under `tests/unit/util/` + `tests/unit/compaction/` as the source of truth.
+>
+> **Phase 8 review follow-ups deferred to v2:**
+>
+> - Protected-tail unit unification: L1 (`toolOutputPruner`) and L3 (`microCompactor`) use `protectedTailMessages` (count); L2 (`snipper`) uses `protectedTailTokens` (token budget). Patrick's "latest 40,000 tokens" directive maps cleanly to L2; orchestrator (Phase 9) wires concrete values that approximate the boundary on L1+L3. v2 should unify on tokens for consistency.
+> - True `original` count preservation across multiple L1 invocations would require a separate metadata field on `ToolResult` (breaking change). v1's idempotence guard prevents the drift but doesn't preserve the true original size if some other code path also truncates content first.
+> - End-to-end pipeline test that chains L1 → L2 → L3 and verifies R10 strict ordering. Each layer is unit-tested in isolation; the composed pipeline is implicit and will land with the Phase 9 orchestrator wiring.
+> - `computeProtectedStart` is exported despite having no current external consumer — testability was the implementer's reason. Could be made non-exported in a future cleanup; cosmetic only.
+
+---
+
 ## Phase 9 — Orchestrator (context, QueryEngine, ReAct loop)
 
 ### Task 29: `context.ts` — environment sensing at session start

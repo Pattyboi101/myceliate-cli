@@ -55,10 +55,13 @@ export function createBashTool(deps: BashToolDeps): Tool<BashInput> {
     capability: 'execution',
     inputSchema: BashInput as BashSchema,
     run: async (input, ctx) => {
-      // cwd: use input override if provided (non-empty), otherwise fall back to ctx.cwd.
-      const cwd = input.cwd !== '' ? input.cwd : ctx.cwd;
-      // timeoutMs: use input override if non-zero, otherwise fall back to deps default.
-      const timeoutMs = input.timeoutMs !== 0 ? input.timeoutMs : defaultTimeout;
+      // cwd: use input override if provided (non-empty/non-undefined), otherwise fall back
+      // to ctx.cwd. The `||` handles both the Zod-default '' case and the undefined case
+      // when run() is called directly (e.g. integration tests) without registry parsing.
+      const cwd = input.cwd || ctx.cwd;
+      // timeoutMs: use input override if non-zero/non-undefined, otherwise fall back
+      // to deps.defaultTimeoutMs. The `||` handles both Zod-default 0 and undefined.
+      const timeoutMs = input.timeoutMs || defaultTimeout;
 
       const verdict = await deps.hitl.checkBash({ command: input.command, cwd });
       if (!verdict.allowed) {

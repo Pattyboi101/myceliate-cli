@@ -1,0 +1,85 @@
+// src/tools/bash.ts
+import { randomUUID } from 'node:crypto';
+import type { Queue, QueueEvents } from 'bullmq';
+import { z } from 'zod';
+import type { BashJobData, BashJobReturn } from '../queue/queues.js';
+import type { HitlGate } from '../security/hitlGate.js';
+import type { Tool } from './registry.js';
+
+// ZodDefault<ZodString>._input is `string | undefined` but _output is `string`.
+// Tool<I> requires inputSchema: ZodType<I, _, I> (same input + output type).
+// This alias widens the schema variable to ZodType<BashInput> so TypeScript
+// accepts the assignment without changing runtime behaviour — at parse time Zod
+// still applies the defaults normally.
+type BashSchema = z.ZodType<BashInput>;
+
+export type BashToolDeps = {
+  hitl: HitlGate;
+  queue: Queue<BashJobData, BashJobReturn>;
+  queueEvents: QueueEvents;
+  defaultTimeoutMs?: number;
+};
+
+// R3 note: `cwd` and `timeoutMs` use `.default()` (not `.optional()`) so that
+// `zodToStrictJsonSchema` can handle them without tripping the ZodOptional guard.
+// ZodDefault unwraps to its inner type in the JSON Schema, listing both fields
+// as required with sensible defaults. The LLM may omit them; Zod fills in the
+// default value at parse time.
+const BashInput = z.object({
+  command: z.string().min(1),
+  /** Optional override; defaults to the orchestrator's cwd. Empty string means "use ctx.cwd". */
+  cwd: z.string().default(''),
+  /** Optional override in ms; defaults to deps.defaultTimeoutMs. 0 means "use deps default". */
+  timeoutMs: z.number().int().nonnegative().default(0),
+});
+type BashInput = z.infer<typeof BashInput>;
+
+function formatResult(r: BashJobReturn): string {
+  return [
+    `exitCode: ${r.exitCode}`,
+    r.timedOut ? 'timedOut: true' : null,
+    r.truncated ? 'truncated: true' : null,
+    r.stdout ? `stdout:\n${r.stdout}` : null,
+    r.stderr ? `stderr:\n${r.stderr}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function createBashTool(deps: BashToolDeps): Tool<BashInput> {
+  const defaultTimeout = deps.defaultTimeoutMs ?? 30_000;
+  return {
+    name: 'bash',
+    description:
+      'Execute a shell command in the agent cwd. Returns exit code, stdout, stderr, and truncation/timeout flags. Dangerous patterns require HITL approval.',
+    capability: 'execution',
+    inputSchema: BashInput as BashSchema,
+    run: async (input, ctx) => {
+      // cwd: use input override if provided (non-empty), otherwise fall back to ctx.cwd.
+      const cwd = input.cwd !== '' ? input.cwd : ctx.cwd;
+      // timeoutMs: use input override if non-zero, otherwise fall back to deps default.
+      const timeoutMs = input.timeoutMs !== 0 ? input.timeoutMs : defaultTimeout;
+
+      const verdict = await deps.hitl.checkBash({ command: input.command, cwd });
+      if (!verdict.allowed) {
+        // Cross-module string contract: src/orchestrator/reactLoop.ts catch block detects
+        // this 'HITL rejected:' prefix to yield tool_result.status='rejected' instead of 'failed'.
+        throw new Error(`HITL rejected: ${verdict.feedback}`);
+      }
+
+      const toolUseId = randomUUID();
+      const job = await deps.queue.add(
+        'bash',
+        {
+          command: input.command,
+          cwd,
+          timeoutMs,
+          toolUseId,
+        },
+        { jobId: toolUseId },
+      );
+      const result = await job.waitUntilFinished(deps.queueEvents);
+      return formatResult(result);
+    },
+  };
+}

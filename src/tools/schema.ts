@@ -23,6 +23,13 @@ function convert(schema: z.ZodTypeAny): JsonSchema {
       'Strict-mode tool schemas (R3) forbid optional fields. Make the field required, or use a separate tool variant.',
     );
   }
+  // ZodDefault wraps an inner type with a fallback value. Unwrap to the inner
+  // type so the field appears as required in the JSON Schema (R3 compliant).
+  // The default value is only applied at Zod parse-time on the TypeScript side;
+  // the JSON Schema lists the field as required with the inner type's shape.
+  if (schema instanceof z.ZodDefault) {
+    return convert(schema._def.innerType as z.ZodTypeAny);
+  }
   if (schema instanceof z.ZodString) return { type: 'string' };
   if (schema instanceof z.ZodNumber) return { type: 'number' };
   if (schema instanceof z.ZodBoolean) return { type: 'boolean' };

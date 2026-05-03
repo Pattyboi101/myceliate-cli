@@ -130,6 +130,10 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
         } satisfies StreamEvent;
       } catch (err) {
         const durationMs = Date.now() - startedAt;
+        // Cross-module string contract: src/tools/bash.ts createBashTool throws
+        // with 'HITL rejected:' prefix on HITL veto. Detect it here to yield
+        // status='rejected' (magenta UI state) instead of status='failed' (red).
+        const isRejection = err instanceof Error && err.message.startsWith('HITL rejected:');
         opts.engine.appendToolResult({
           tool_use_id: call.id,
           command: `${call.name} ${JSON.stringify(call.args)}`,
@@ -139,7 +143,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
         yield {
           type: 'tool_result',
           id: call.id,
-          status: 'failed',
+          status: isRejection ? 'rejected' : 'failed',
           durationMs,
           cause: err,
         } satisfies StreamEvent;

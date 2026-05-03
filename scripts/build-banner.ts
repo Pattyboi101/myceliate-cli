@@ -4,12 +4,13 @@
 // rows that Ink can render directly. Run on demand when the source art changes.
 //
 // Usage: pnpm tsx scripts/build-banner.ts
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
-// xterm-256 → hex, only the entries we need (16-21 blue ramp + 255 + 7 silver bg).
+// xterm-256 → hex. Add new entries here when durdraw art uses unfamiliar colours.
 const PALETTE: Record<number, string> = {
   7: '#c0c0c0',
   16: '#000000',
@@ -18,6 +19,8 @@ const PALETTE: Record<number, string> = {
   19: '#0000af',
   20: '#0000d7',
   21: '#0000ff',
+  27: '#005fff',
+  232: '#080808',
   255: '#eeeeee',
 };
 
@@ -28,71 +31,89 @@ type DurFrame = {
   colorMap: Array<Array<[number, number]>>; // [col][row] = [fg, bg]
 };
 
-type DurMovie = { DurMovie: { sizeX: number; sizeY: number; frames: DurFrame[] } };
+type DurMovie = {
+  DurMovie: { sizeX: number; sizeY: number; framerate: number; frames: DurFrame[] };
+};
+
+type Run = { text: string; fg: string };
+
+function frameToRows(frame: DurFrame, sizeX: number): Run[][] {
+  const { contents, colorMap } = frame;
+  // Identify the actual art area: rows that contain any non-space character.
+  const nonBlankRows: number[] = [];
+  for (let row = 0; row < contents.length; row += 1) {
+    const r = contents[row] ?? '';
+    if (r.replace(/\s/g, '').length > 0) nonBlankRows.push(row);
+  }
+  const firstRow = nonBlankRows[0];
+  const lastRow = nonBlankRows[nonBlankRows.length - 1];
+  if (firstRow === undefined || lastRow === undefined) return [];
+
+  const rows: Run[][] = [];
+  for (let row = firstRow; row <= lastRow; row += 1) {
+    const rowChars = (contents[row] ?? '').padEnd(sizeX, ' ');
+    const runs: Run[] = [];
+    let current: Run | null = null;
+    for (let col = 0; col < sizeX; col += 1) {
+      const ch = rowChars[col] ?? ' ';
+      const cell = colorMap[col]?.[row] ?? [255, 0];
+      const [fgIdx] = cell;
+      const fg = ch === ' ' ? 'inherit' : (PALETTE[fgIdx] ?? '#ffffff');
+      if (current && current.fg === fg) {
+        current.text += ch;
+      } else {
+        if (current) runs.push(current);
+        current = { text: ch, fg };
+      }
+    }
+    if (current) runs.push(current);
+    while (runs.length > 0) {
+      const last = runs[runs.length - 1];
+      if (last && last.fg === 'inherit' && last.text.trim() === '') runs.pop();
+      else break;
+    }
+    rows.push(runs);
+  }
+  return rows;
+}
 
 const sourcePath = process.argv[2] ?? join(homedir(), 'Myceliate', 'myceliate_title');
 const raw = readFileSync(sourcePath);
 const json = gunzipSync(raw).toString('utf8');
 const movie = JSON.parse(json) as DurMovie;
-const frame = movie.DurMovie.frames[0];
-if (!frame) throw new Error('no frame in movie');
-const { contents, colorMap } = frame;
 const sizeX = movie.DurMovie.sizeX;
+const framerate = movie.DurMovie.framerate;
 
-// Identify the actual art area: rows that contain any non-space character.
-const nonBlankRows: number[] = [];
-for (let row = 0; row < contents.length; row += 1) {
-  const r = contents[row] ?? '';
-  if (r.replace(/\s/g, '').length > 0) nonBlankRows.push(row);
-}
-const firstRow = nonBlankRows[0];
-const lastRow = nonBlankRows[nonBlankRows.length - 1];
-if (firstRow === undefined || lastRow === undefined) throw new Error('frame is empty');
+// Convert every frame; drop any frames that turned out empty after trimming.
+const allFrames: Run[][][] = movie.DurMovie.frames
+  .map((f) => frameToRows(f, sizeX))
+  .filter((rows) => rows.length > 0);
 
-// Build colour-run rows. Each row is an array of {text, fg} runs; consecutive
-// cells with the same fg get merged into a single run to keep the React tree small.
-type Run = { text: string; fg: string };
-const rows: Run[][] = [];
-for (let row = firstRow; row <= lastRow; row += 1) {
-  const rowChars = (contents[row] ?? '').padEnd(sizeX, ' ');
-  const runs: Run[] = [];
-  let current: Run | null = null;
-  for (let col = 0; col < sizeX; col += 1) {
-    const ch = rowChars[col] ?? ' ';
-    const cell = colorMap[col]?.[row] ?? [255, 0];
-    const [fgIdx] = cell;
-    // Spaces don't carry colour visibly; collapse to a neutral fg so they don't
-    // split runs unnecessarily.
-    const fg = ch === ' ' ? 'inherit' : (PALETTE[fgIdx] ?? '#ffffff');
-    if (current && current.fg === fg) {
-      current.text += ch;
-    } else {
-      if (current) runs.push(current);
-      current = { text: ch, fg };
-    }
-  }
-  if (current) runs.push(current);
-  // Trim trailing all-space runs from each row (purely cosmetic).
-  while (
-    runs.length > 0 &&
-    runs[runs.length - 1]?.fg === 'inherit' &&
-    runs[runs.length - 1]?.text.trim() === ''
-  ) {
-    runs.pop();
-  }
-  rows.push(runs);
-}
+if (allFrames.length === 0) throw new Error('no non-empty frames in movie');
+
+const totalRuns = allFrames.reduce((n, frame) => n + frame.reduce((m, r) => m + r.length, 0), 0);
 
 const out = `// src/ui/banner-art.ts
 // AUTO-GENERATED by scripts/build-banner.ts from ~/Myceliate/myceliate_title.
 // Re-run \`pnpm tsx scripts/build-banner.ts\` if the source art changes.
 
 export type BannerRun = { text: string; fg: string };
-export const BANNER_ROWS: readonly (readonly BannerRun[])[] = ${JSON.stringify(rows, null, 2)} as const;
+/** All frames; each frame is an array of rows; each row an array of colour-runs. */
+export const BANNER_FRAMES: readonly (readonly (readonly BannerRun[])[])[] = ${JSON.stringify(allFrames, null, 2)} as const;
+export const BANNER_FRAMERATE_FPS = ${framerate};
+/** Convenience alias for static-banner consumers (first frame only). */
+export const BANNER_ROWS: readonly (readonly BannerRun[])[] = BANNER_FRAMES[0] ?? [];
 `;
 
 const outPath = join(process.cwd(), 'src/ui/banner-art.ts');
 writeFileSync(outPath, out, 'utf8');
+// Run biome format so the generated module passes `pnpm lint` without manual
+// fixup. Failure is non-fatal (e.g. biome not installed) — just warn.
+try {
+  execFileSync('pnpm', ['exec', 'biome', 'format', '--write', outPath], { stdio: 'ignore' });
+} catch (err) {
+  console.warn('biome format step skipped:', err instanceof Error ? err.message : err);
+}
 console.log(
-  `wrote ${outPath} — ${rows.length} rows, ${rows.reduce((n, r) => n + r.length, 0)} colour runs`,
+  `wrote ${outPath} — ${allFrames.length} frame(s) at ${framerate} fps, ${totalRuns} colour runs total`,
 );

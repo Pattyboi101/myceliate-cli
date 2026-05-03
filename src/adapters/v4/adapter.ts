@@ -5,7 +5,6 @@ import type { ChatRequest, DeepSeekClient } from '../DeepSeekClient.js';
 import type { Message } from '../messages.js';
 import type { StreamEvent } from '../streamEvent.js';
 import { DsmlParser, escapeXml } from './dsmlParser.js';
-import { detectLeakedDsml } from './leakFallback.js';
 
 type SseOpener = (init: FetchInit) => Promise<AsyncIterable<Uint8Array>>;
 
@@ -141,6 +140,14 @@ export class V4Adapter implements DeepSeekClient {
     }
 
     const dsml = new DsmlParser();
+    // F6: persist a second DsmlParser for the reasoning channel. Stateless
+    // detectLeakedDsml() short-circuited whenever a single chunk lacked either
+    // marker, so DSML markup that legitimately leaked into reasoning_content
+    // and was split across SSE deltas fell through to raw passthrough — the
+    // markup leaked into user-visible reasoning, and the tool call was lost.
+    // The content channel already does this correctly; symmetric treatment for
+    // reasoning closes the gap.
+    const dsmlReasoning = new DsmlParser();
 
     // Phase-2 lesson: mid-stream failure is caught and yields error event, not throw.
     try {
@@ -159,11 +166,16 @@ export class V4Adapter implements DeepSeekClient {
 
         // Phase-2 lesson: explicit string length check instead of truthy (avoids dropping empty strings).
         if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
-          // Wire through leak fallback for vLLM/NIM servers that leak DSML into reasoning_content.
-          const { cleanedText, toolCalls } = detectLeakedDsml(delta.reasoning_content);
-          if (cleanedText.length > 0) yield { type: 'reasoning_delta', text: cleanedText };
-          for (const tc of toolCalls)
-            yield { type: 'tool_call', id: tc.id, name: tc.name, args: tc.args };
+          // F6: route reasoning_content through a persistent DsmlParser. The
+          // parser emits content-channel events; remap content_delta to
+          // reasoning_delta, pass tool_call through verbatim. Cross-chunk DSML
+          // leaks now buffer correctly inside the parser instead of falling
+          // through to raw passthrough as the previous stateless
+          // detectLeakedDsml call did.
+          for (const e of dsmlReasoning.feed(delta.reasoning_content)) {
+            if (e.type === 'content_delta') yield { type: 'reasoning_delta', text: e.text };
+            else yield e; // tool_call passes through
+          }
         }
 
         if (typeof delta?.content === 'string' && delta.content.length > 0) {
@@ -177,6 +189,11 @@ export class V4Adapter implements DeepSeekClient {
           // Drain any content-mode tail bytes the safe-prefix logic withheld. At
           // terminal finish, those bytes can't be a partial OPEN_BLOCK any more.
           for (const e of dsml.flush()) yield e;
+          // F6: drain the reasoning channel symmetrically.
+          for (const e of dsmlReasoning.flush()) {
+            if (e.type === 'content_delta') yield { type: 'reasoning_delta', text: e.text };
+            else yield e;
+          }
           const u = chunk.usage;
           yield {
             type: 'done',

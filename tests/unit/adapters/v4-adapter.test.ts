@@ -204,12 +204,66 @@ describe('V4Adapter', () => {
         strict: true,
       }),
     );
-    expect(events).toContainEqual({
-      type: 'reasoning_delta',
-      text: 'plan  done',
-    });
+    // F6: parser-driven now — reasoning_delta events bracket the extracted
+    // tool_call (one for the prefix, one for the suffix). Concatenated, the
+    // cleaned text matches the original assertion ("plan  done").
+    const reasoningTexts = events
+      .filter((e): e is Extract<typeof e, { type: 'reasoning_delta' }> => e.type === 'reasoning_delta')
+      .map((e) => e.text);
+    expect(reasoningTexts.join('')).toBe('plan  done');
+    // No literal markup leaked into any reasoning_delta.
+    for (const t of reasoningTexts) {
+      expect(t).not.toContain('<|DSML|');
+      expect(t).not.toContain('<call');
+    }
     expect(events).toContainEqual({ type: 'tool_call', id: 't', name: 'ls', args: {} });
     expect(events.at(-1)).toMatchObject({ type: 'done' });
+  });
+
+  // F6: cross-chunk DSML leak in reasoning_content. Pre-fix, stateless
+  // detectLeakedDsml short-circuited whenever a single chunk lacked either
+  // marker, so each chunk fell through to raw passthrough — markup leaked
+  // into user-visible reasoning, and the tool call was lost. The persisted
+  // DsmlParser buffers across chunks and emits exactly one tool_call.
+  it('handles DSML markup split across two reasoning_content deltas (cross-chunk)', async () => {
+    async function* splitStream(): AsyncIterable<Uint8Array> {
+      // Chunk 1 contains OPEN_BLOCK and the call open; chunk 2 contains the rest.
+      const lines = [
+        'data: {"choices":[{"delta":{"reasoning_content":"plan <|DSML|tool_calls><call id=\\"t\\" name=\\"ls\\">"}}]}\n\n',
+        'data: {"choices":[{"delta":{"reasoning_content":"</call></|DSML|tool_calls> done"}}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"completion_tokens_details":{"reasoning_tokens":1}}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+      for (const l of lines) yield enc.encode(l);
+    }
+    const opener = vi.fn().mockResolvedValue(splitStream());
+    const adapter = new V4Adapter({ apiKey: 'k', baseUrl: 'x', openSse: opener });
+    const events = await collect(
+      adapter.stream({
+        model: 'm',
+        messages: [{ role: 'user', content: 'hi' }],
+        thinking: true,
+        strict: true,
+      }),
+    );
+    // Exactly one tool_call emitted, despite the markup straddling two SSE deltas.
+    const toolCalls = events.filter(
+      (e): e is Extract<typeof e, { type: 'tool_call' }> => e.type === 'tool_call',
+    );
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]).toMatchObject({ id: 't', name: 'ls', args: {} });
+    // No literal DSML markup leaked into any reasoning_delta.
+    const reasoningTexts = events
+      .filter((e): e is Extract<typeof e, { type: 'reasoning_delta' }> => e.type === 'reasoning_delta')
+      .map((e) => e.text);
+    for (const t of reasoningTexts) {
+      expect(t).not.toContain('<|DSML|');
+      expect(t).not.toContain('</|DSML|');
+      expect(t).not.toContain('<call');
+      expect(t).not.toContain('</call>');
+    }
+    // Cleaned text concatenation matches the non-DSML portion of the original.
+    expect(reasoningTexts.join('')).toBe('plan  done');
   });
 
   // ── Parser flush at terminal finish — drain content-mode tail ──────────────

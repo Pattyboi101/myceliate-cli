@@ -5,6 +5,7 @@ import type React from 'react';
 import type { ApprovalRequest, ApprovalResponse } from '../security/hitlGate.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
 import { ContentStream } from './ContentStream.js';
+import { PromptInput } from './PromptInput.js';
 import { ReasoningBlock } from './ReasoningBlock.js';
 
 export type ReasoningState = {
@@ -20,17 +21,31 @@ export type ReasoningState = {
   endedAtMs?: number;
 };
 
+export type CompletedTurn = {
+  userInput: string;
+  content: string;
+};
+
 export type AppState = {
   userInput: string;
   reasoning: ReasoningState | null;
   content: string;
   approvalRequest: ApprovalRequest | null;
+  /** REPL phase: streaming = a turn is in flight; awaiting_input = ready for next prompt. */
+  phase: 'streaming' | 'awaiting_input';
+  /** Append-only log of completed turns (rendered above the live region). */
+  turns: CompletedTurn[];
 };
 
 export function App({
   state,
   onApprovalResponse,
-}: { state: AppState; onApprovalResponse?: (r: ApprovalResponse) => void }): React.JSX.Element {
+  onPromptSubmit,
+}: {
+  state: AppState;
+  onApprovalResponse?: (r: ApprovalResponse) => void;
+  onPromptSubmit?: (text: string) => void;
+}): React.JSX.Element {
   // U1 mandates the reasoning trace is "Toggleable via keyboard." Tab flips
   // expansion; ReasoningBlock's collapsed view advertises this affordance.
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
@@ -40,25 +55,40 @@ export function App({
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box marginBottom={1}>
-        <Text color="green">{'> '}</Text>
-        <Text>{state.userInput}</Text>
-      </Box>
-      {state.reasoning !== null && (
-        <ReasoningBlock
-          text={state.reasoning.text}
-          phase={state.reasoning.phase}
-          durationMs={(state.reasoning.endedAtMs ?? Date.now()) - state.reasoning.startedAtMs}
-          expanded={reasoningExpanded}
-        />
+      {state.turns.map((t, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: append-only log, indices are stable.
+        <Box key={i} flexDirection="column" marginBottom={1}>
+          <Box>
+            <Text color="green">{'> '}</Text>
+            <Text>{t.userInput}</Text>
+          </Box>
+          <Text>{t.content}</Text>
+        </Box>
+      ))}
+      {state.phase === 'streaming' && (
+        <>
+          <Box marginBottom={1}>
+            <Text color="green">{'> '}</Text>
+            <Text>{state.userInput}</Text>
+          </Box>
+          {state.reasoning !== null && (
+            <ReasoningBlock
+              text={state.reasoning.text}
+              phase={state.reasoning.phase}
+              durationMs={(state.reasoning.endedAtMs ?? Date.now()) - state.reasoning.startedAtMs}
+              expanded={reasoningExpanded}
+            />
+          )}
+          {state.content.length > 0 && <ContentStream text={state.content} />}
+        </>
       )}
-      {state.content.length > 0 && <ContentStream text={state.content} />}
       {state.approvalRequest !== null && (
         <ApprovalPrompt
           request={state.approvalRequest}
           onResponse={onApprovalResponse ?? (() => {})}
         />
       )}
+      {state.phase === 'awaiting_input' && <PromptInput onSubmit={onPromptSubmit ?? (() => {})} />}
     </Box>
   );
 }

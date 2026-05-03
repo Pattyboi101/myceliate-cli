@@ -10,9 +10,7 @@ import type React from 'react';
  * U3-compliant: no Clack mid-Ink-render. The agent loop owns input via Ink
  * for the entire session (Clack only runs pre-Ink during onboarding).
  */
-export function PromptInput({
-  onSubmit,
-}: { onSubmit: (text: string) => void }): React.JSX.Element {
+export function PromptInput({ onSubmit }: { onSubmit: (text: string) => void }): React.JSX.Element {
   const [buffer, setBuffer] = useState('');
 
   useInput((input, key) => {

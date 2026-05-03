@@ -63,6 +63,8 @@ async function main(): Promise<void> {
     reasoning: null,
     content: '',
     approvalRequest: null,
+    phase: 'streaming',
+    turns: [],
   };
   const ink = render(React.createElement(App, { state }));
 

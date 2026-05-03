@@ -1,7 +1,7 @@
 // tests/unit/ui/PromptInput.test.tsx
 import { render } from 'ink-testing-library';
-import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
+import { describe, expect, it, vi } from 'vitest';
 import { PromptInput } from '../../../src/ui/PromptInput.js';
 
 describe('PromptInput', () => {

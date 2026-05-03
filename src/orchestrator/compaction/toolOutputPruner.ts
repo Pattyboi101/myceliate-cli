@@ -26,7 +26,15 @@ export function pruneToolOutputs(history: readonly Message[], opts: PruneOptions
         return;
       }
       // Truncate oversized content in the unprotected zone only.
-      if (i < protectedFrom && m.result.content.length > opts.maxToolOutputChars) {
+      // Idempotence guard: skip if content already carries a truncation marker —
+      // otherwise repeated L1 invocations would stack markers and overwrite the
+      // recorded `original N chars` count, drifting it down each pass.
+      const alreadyTruncated = m.result.content.includes('[truncated:');
+      if (
+        i < protectedFrom &&
+        m.result.content.length > opts.maxToolOutputChars &&
+        !alreadyTruncated
+      ) {
         const truncated: ToolResultMessage = {
           role: 'tool',
           result: {

@@ -90,4 +90,43 @@ describe('BudgetChecker', () => {
     const verdict = c.check(msgs);
     expect(verdict.used).toBe(11);
   });
+
+  it('rejects misconfigured threshold ladder (prune > snip)', () => {
+    expect(
+      () =>
+        new BudgetChecker({
+          workingBudget: 1000,
+          pruneThresholdPct: 90, // higher than snip — invalid
+          snipThresholdPct: 80,
+          microThresholdPct: 92,
+          refusalThresholdPct: 95,
+        }),
+    ).toThrow(/non-decreasing/i);
+  });
+
+  it('rejects misconfigured threshold ladder (micro > refusal)', () => {
+    expect(
+      () =>
+        new BudgetChecker({
+          workingBudget: 1000,
+          pruneThresholdPct: 80,
+          snipThresholdPct: 85,
+          microThresholdPct: 99, // higher than refusal — invalid
+          refusalThresholdPct: 95,
+        }),
+    ).toThrow(/non-decreasing/i);
+  });
+
+  it('accepts equal adjacent thresholds (non-decreasing, not strictly increasing)', () => {
+    expect(
+      () =>
+        new BudgetChecker({
+          workingBudget: 1000,
+          pruneThresholdPct: 80,
+          snipThresholdPct: 80,
+          microThresholdPct: 80,
+          refusalThresholdPct: 95,
+        }),
+    ).not.toThrow();
+  });
 });

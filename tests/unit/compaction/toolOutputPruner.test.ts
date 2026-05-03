@@ -94,4 +94,38 @@ describe('pruneToolOutputs', () => {
     const result = (out[0] as Extract<Message, { role: 'tool' }>).result.content;
     expect(result).toContain('[truncated: original 5000 chars]');
   });
+
+  it('idempotence: re-pruning already-truncated content does not stack markers or drift the original-count annotation', () => {
+    // Without the idempotence guard, a second L1 pass would re-truncate the
+    // already-truncated content (length ~ maxToolOutputChars + marker overhead)
+    // and overwrite the recorded `original 5000 chars` with a smaller drifted count.
+    const original = 'a'.repeat(5000);
+    const history: Message[] = [tool('t1', 'cmd', original)];
+    const opts = { maxToolOutputChars: 100, protectedTailMessages: 0 };
+    const once = pruneToolOutputs(history, opts);
+    const twice = pruneToolOutputs(once, opts);
+    const onceContent = (once[0] as Extract<Message, { role: 'tool' }>).result.content;
+    const twiceContent = (twice[0] as Extract<Message, { role: 'tool' }>).result.content;
+    // After the guard: second pass is a no-op — content is byte-identical, the
+    // `original 5000 chars` annotation is preserved.
+    expect(twiceContent).toBe(onceContent);
+    expect(twiceContent).toContain('[truncated: original 5000 chars]');
+  });
+
+  it('read_file dedup is zone-agnostic — older duplicate dropped even when both copies are in the protected tail', () => {
+    // Documents that dedup wins over zone protection: a stale `read_file` output
+    // from an earlier turn is dropped even if both copies fall inside the
+    // protectedTailMessages window. Only the latest copy is retained.
+    const history: Message[] = [
+      tool('t1', 'read_file foo.ts', 'v1'),
+      tool('t2', 'read_file foo.ts', 'v2'),
+    ];
+    const out = pruneToolOutputs(history, {
+      maxToolOutputChars: 100_000,
+      protectedTailMessages: 2, // protects both
+    });
+    const tools = out.filter((m): m is Extract<Message, { role: 'tool' }> => m.role === 'tool');
+    expect(tools).toHaveLength(1);
+    expect(tools[0]?.result.content).toBe('v2');
+  });
 });

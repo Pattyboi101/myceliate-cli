@@ -17,7 +17,22 @@ export type BudgetVerdict = {
 };
 
 export class BudgetChecker {
-  constructor(private readonly t: BudgetThresholds) {}
+  constructor(private readonly t: BudgetThresholds) {
+    // Catch misconfigured threshold ladders early. The action-ladder logic in
+    // check() relies on prune <= snip <= micro <= refusal; a swapped pair would
+    // silently produce confusing verdicts.
+    const {
+      pruneThresholdPct: p,
+      snipThresholdPct: s,
+      microThresholdPct: m,
+      refusalThresholdPct: r,
+    } = t;
+    if (!(p <= s && s <= m && m <= r)) {
+      throw new Error(
+        `BudgetThresholds must be non-decreasing: prune (${p}) <= snip (${s}) <= micro (${m}) <= refusal (${r})`,
+      );
+    }
+  }
 
   check(history: readonly Message[]): BudgetVerdict {
     const used = estimateHistoryTokens(history);

@@ -64,4 +64,30 @@ describe('microCompact', () => {
       '[micro-compacted]',
     );
   });
+
+  it('does not mutate the original tool message — clones via new object literal', () => {
+    // Patrick's metadata-retention contract: tool_use_id, command, is_error are
+    // strictly cloned by value-copy from the original. The original message must
+    // remain unchanged after micro-compaction.
+    const original: Message = {
+      role: 'tool',
+      result: {
+        tool_use_id: 't1',
+        command: 'bash echo a',
+        is_error: false,
+        content: 'ORIGINAL CONTENT',
+      },
+    };
+    const history: Message[] = [original];
+    const out = microCompact(history, { protectedTailMessages: 0 });
+    // Returned object is a fresh allocation
+    expect(out[0]).not.toBe(original);
+    // Original message is unchanged — content NOT replaced in place
+    if (original.role === 'tool') {
+      expect(original.result.content).toBe('ORIGINAL CONTENT');
+      expect(original.result.tool_use_id).toBe('t1');
+      expect(original.result.command).toBe('bash echo a');
+      expect(original.result.is_error).toBe(false);
+    }
+  });
 });

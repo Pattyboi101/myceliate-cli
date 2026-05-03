@@ -6,8 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { DeepSeekClient } from '../../../src/adapters/DeepSeekClient.js';
-import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
-import type { Usage } from '../../../src/adapters/streamEvent.js';
+import type { StreamEvent, Usage } from '../../../src/adapters/streamEvent.js';
 import { QueryEngine } from '../../../src/orchestrator/QueryEngine.js';
 import { runReactLoop } from '../../../src/orchestrator/reactLoop.js';
 import { ToolRegistry } from '../../../src/tools/registry.js';
@@ -186,6 +185,41 @@ it('yields tool_result with status=completed and durationMs after a successful i
   expect(result?.id).toBe('t1');
   expect(result?.durationMs).toBeGreaterThanOrEqual(0);
   expect(result?.preview).toContain('OK');
+});
+
+it('locks event ordering: all tool_call → turn_complete → all tool_result (Phase 13 review M1 regression)', async () => {
+  // Phase 13 review M1: the `src/index.ts` onState consumer relies on this
+  // ordering. If turn_complete is repositioned (or if a future refactor drops
+  // it before tool_call dispatch), the consumer's `tool_result` map will fire
+  // against an empty `state.toolCalls` because turn_complete clears reasoning
+  // state at that boundary. Locking the orchestrator-side ordering contract
+  // here makes any drift fail loudly instead of silently breaking the cards.
+  const tools = makeMockTools({ bash: async () => 'ok' });
+  const client = makeMockClient([
+    [
+      { type: 'tool_call', id: 't1', name: 'bash', args: { command: 'a' } },
+      { type: 'tool_call', id: 't2', name: 'bash', args: { command: 'b' } },
+      { type: 'done', usage: zeroUsage() },
+    ],
+    [
+      { type: 'content_delta', text: 'done' },
+      { type: 'done', usage: zeroUsage() },
+    ],
+  ]);
+  const events: StreamEvent[] = [];
+  const engine = new QueryEngine({ systemPrompt: 's', workingBudget: 1_000_000 });
+  engine.appendUser('go');
+  for await (const ev of runReactLoop({ client, engine, tools, model: 'm', cwd: '/tmp' }))
+    events.push(ev);
+  const types = events.map((e) => e.type);
+  const lastToolCall = types.lastIndexOf('tool_call');
+  const turnComplete = types.indexOf('turn_complete');
+  const firstToolResult = types.indexOf('tool_result');
+  expect(lastToolCall).toBeGreaterThan(-1);
+  expect(turnComplete).toBeGreaterThan(-1);
+  expect(firstToolResult).toBeGreaterThan(-1);
+  expect(lastToolCall).toBeLessThan(turnComplete);
+  expect(turnComplete).toBeLessThan(firstToolResult);
 });
 
 it('yields tool_result with status=failed and a cause when invoke throws', async () => {

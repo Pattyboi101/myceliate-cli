@@ -141,7 +141,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
           id: call.id,
           status: 'failed',
           durationMs,
-          ...(err !== undefined ? { cause: err } : {}),
+          cause: err,
         } satisfies StreamEvent;
       }
     }

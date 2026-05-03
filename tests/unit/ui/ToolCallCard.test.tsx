@@ -44,6 +44,9 @@ describe('ToolCallCard', () => {
     expect(lastFrame()).toContain('spawn ENOENT');
   });
 
+  // Phase 14 Task 92 will wire the orchestrator-side emission of `status: 'rejected'`
+  // through the HITL gate's bash-veto path. The card-rendering contract is locked here
+  // so the Phase 14 implementer needs only to emit the event, not change the UI.
   it('renders rejection feedback when status is rejected', () => {
     const card: ToolCallCardState = {
       id: 't1',

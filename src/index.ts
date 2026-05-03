@@ -149,13 +149,20 @@ async function main(): Promise<void> {
             ),
           });
         } else if (ev.type === 'turn_complete') {
-          // F4 reset, extended: clear per-turn buffers AND toolCalls so each turn's
-          // card list shows only the current turn's calls (not a growing stack across
-          // a multi-turn ReAct flow).
+          // F4 reset: clear per-turn reasoning + content buffers so turn N's
+          // content does not concatenate onto turn N-1's. Phase 13 review M1:
+          // do NOT clear `toolCalls` here. `runReactLoop` yields `turn_complete`
+          // BEFORE the `for (const call of pendingCalls)` loop (reactLoop.ts:82),
+          // which means `tool_result` events arrive AFTER `turn_complete`. If we
+          // wiped `toolCalls` on `turn_complete`, the subsequent `tool_result`
+          // map would silently no-op against an empty array and cards would
+          // never transition from `running` to `completed`/`failed`. Cards are
+          // cleared at the REPL boundary instead — `onTurnComplete` and the
+          // `readNextPrompt` resolver below.
           reasoningText = '';
           contentText = '';
           reasonStartedAt = Date.now();
-          rerender({ ...state, reasoning: null, content: '', toolCalls: [] });
+          rerender({ ...state, reasoning: null, content: '' });
         } else if (ev.type === 'error') {
           logger.error({
             event: 'stream_error',

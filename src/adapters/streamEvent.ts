@@ -24,10 +24,16 @@ export type StreamEvent =
    * resolves, rejects, or is vetoed by the HITL gate. Adapters never emit it
    * (case is added to their switches for exhaustiveness only). The `id`
    * matches the originating `tool_call.id` so the UI can map status updates
-   * onto rendered cards. `durationMs` measures only `tools.invoke` wall time
-   * (not orchestrator overhead). `preview` is the redacted, truncated head
-   * of the result content (≤200 chars). `cause` is set on failures for
-   * structured surfacing in the UI.
+   * onto rendered cards. `durationMs` measures `tools.invoke` wall time on the
+   * success path; on the failure path it includes any artifact-offload time
+   * before the throw. `preview` is the redacted, truncated head of the result
+   * content (≤200 chars). `cause` is set on failures for structured surfacing.
+   *
+   * `status: 'rejected'` is type-allowed for the HITL veto path but is not
+   * yielded by `runReactLoop` in v1.1 — Phase 14 Task 92 wires the bash tool's
+   * dangerous-command rejection into this status. `<ToolCallCard>` already
+   * renders the rejected state (test coverage exists) so Phase 14 needs only
+   * the orchestrator-side emission.
    */
   | {
       type: 'tool_result';

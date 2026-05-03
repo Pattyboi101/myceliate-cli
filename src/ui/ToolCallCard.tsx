@@ -36,6 +36,31 @@ function summariseArgs(args: unknown): string {
 
 const COLLAPSED_LINES = 5;
 
+const REDACT_RE = /\[REDACTED:[^\]]+\]/g;
+
+function HighlightedLine({ line }: { line: string }): React.JSX.Element {
+  // Split on the redaction marker to colour-segment the line.
+  const parts: Array<{ text: string; redacted: boolean }> = [];
+  let lastIndex = 0;
+  for (const m of line.matchAll(REDACT_RE)) {
+    if (m.index === undefined) continue;
+    if (m.index > lastIndex) parts.push({ text: line.slice(lastIndex, m.index), redacted: false });
+    parts.push({ text: m[0], redacted: true });
+    lastIndex = m.index + m[0].length;
+  }
+  if (lastIndex < line.length) parts.push({ text: line.slice(lastIndex), redacted: false });
+  return (
+    <Text>
+      {parts.map((p, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: stable segments.
+        <Text key={i} color={p.redacted ? 'magenta' : 'gray'}>
+          {p.text}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
 export function ToolCallCard({
   card,
   expanded = false,
@@ -58,9 +83,7 @@ export function ToolCallCard({
         <Box flexDirection="column" marginTop={1}>
           {visibleLines.map((line, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: stable lines.
-            <Text key={i} color="gray">
-              {line}
-            </Text>
+            <HighlightedLine key={i} line={line} />
           ))}
           {hiddenCount > 0 && <Text color="gray">{`… ${hiddenCount} more lines`}</Text>}
         </Box>

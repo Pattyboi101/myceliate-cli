@@ -92,4 +92,21 @@ describe('ToolCallCard', () => {
     const { lastFrame } = render(<ToolCallCard card={card} expanded />);
     expect(lastFrame()).toContain('line 9');
   });
+
+  it('highlights [REDACTED:*] markers in the preview body with magenta', () => {
+    const card: ToolCallCardState = {
+      id: 't1',
+      name: 'bash',
+      args: { command: 'env' },
+      status: 'completed',
+      durationMs: 5,
+      preview: 'OPENAI_API_KEY=[REDACTED:env_value]\nOTHER=plain',
+    };
+    const { lastFrame } = render(<ToolCallCard card={card} />);
+    const frame = lastFrame() ?? '';
+    // Magenta ANSI sequence — Ink uses standard chalk colors.
+    expect(frame).toContain('[REDACTED:env_value]');
+    // The plain line should appear unchanged.
+    expect(frame).toContain('OTHER=plain');
+  });
 });

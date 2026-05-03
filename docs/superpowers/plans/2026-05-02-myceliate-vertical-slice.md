@@ -4266,6 +4266,41 @@ git commit -m "feat(orchestrator): ReAct loop async generator with R2-aware hist
 
 ---
 
+> **Phase 9 review-iteration note:** During Phase 9 execution, code review surfaced one Important fix plus two locking-in tests applied beyond Tasks 29–31 specs (commit `baaaff1`). All standard priority asks plus Patrick's two extras (tool exception propagation, R2 edge cases) came back clean.
+>
+> - **Important: dead R2 `tool_calls` copy in `applyR2` rewrite branch.** The branch is only entered when `!hasToolCalls(m)`, but the rewrite path was conditionally copying `m.tool_calls` onto the rewritten message via `if (m.tool_calls) copy.tool_calls = m.tool_calls;`. In the edge case where `m.tool_calls === []`, the empty array was copied — producing an invalid wire shape for both V3 and V4 adapters. Line removed; rewrite now returns `{ role: 'assistant', content: m.content }` only.
+> - **Test added: ZodError → `is_error: true` end-to-end.** Tool whose Zod schema rejects the LLM-supplied args produces an `is_error` tool result with the validation error in `content`; the loop continues to the next turn. Path was correct by construction but had no dedicated integration test.
+> - **Test added: non-async sync-throw recovery.** Tool registered with a non-async `run()` that throws synchronously is caught by reactLoop's try/catch via `registry.invoke`'s async signature. Locks in the load-bearing safety net that turns every synchronous throw into a rejected Promise the outer `await` catches uniformly. Without it, a single typo in any tool's `run` body would crash the agent.
+>
+> **Patrick-mandated additive extensions during implementation** (commits `f47a36e`, `a7983d8`):
+>
+> - **`senseContext` extended with `gitStatus` + `dirEntries`.** `spawnCollect('git', ['status', '--porcelain'], cwd)` matches Phase 5's `spawn`-not-`exec` pattern; resolves to empty string on ENOENT or non-zero exit. `listDirEntries` returns `[]` on missing cwd. Three async ops run in `Promise.all`.
+> - **`runReactLoop` extended with `artifactStore?` + `artifactThresholdBytes?`** (default 4096). When `artifactStore` is provided, oversized tool results are offloaded via `MarkdownStore.storeArtifact` and the conversation log gets a compact pointer-format string: `[artifact:<id>] <bytes> bytes stored at <path>\npreview: <first 200 chars>`. Integration test verifies a 5,000-byte tool output with 1,000-byte threshold produces the pointer (not raw content) and the artifact file lands on disk.
+>
+> **Pre-flagged inline fixes during implementation:**
+>
+> - **Plan compaction test arithmetic was unreachable.** Task 30's plan test used `workingBudget: 200` with 10K-char content; 2,500 tokens at 1,250% of budget triggers `refuse` immediately. Recalibrated to `workingBudget: 800`, `maxToolOutputChars: 200`, `protectedTailMessages: 0`, content `'x'.repeat(2_400)` so the test exercises the prune path it claims to.
+> - **`proc.stdout` null guard** in `spawnCollect` per `noUncheckedIndexedAccess` (same pattern as Phase 5 `bashJob.ts`).
+> - **R2 destructure rewrite from `const { reasoning_content: _r, ...rest } = m`** to explicit reconstruction (avoids unused-var lint).
+>
+> Reviewer verdicts on the priority asks:
+>
+> - **Tool failure exception propagation** — ALL scenarios caught and recovered. `registry.invoke` being `async` is the universal safety net. Sync throw, async throw, `Promise.reject`, `ZodError`, `storeArtifact` rejection, re-entrant catch-handler exception, generator cleanup on consumer break — all clean.
+> - **R2 edge cases** — clean per-turn correctness. Empty `reasoning_content`, missing `tool_calls`, empty `tool_calls: []`, multiple consecutive assistant turns, mid-history vs tail all handled. Adapters' `serializeMessage` provides a belt-and-suspenders strip of empty `reasoning_content` at wire-format time.
+>
+> Tests: 229 → 254 unit (+25) plus 2 → 6 integration (+4 reactLoop tests). Treat the code under `src/orchestrator/` (`context.ts`, `QueryEngine.ts`, `reactLoop.ts`) and the corresponding tests as the source of truth.
+>
+> **Phase 9 review follow-ups deferred to v2:**
+>
+> - `context.ts` `spawnCollect`: no byte cap on stdout; orphaned-child cleanup on `!proc.stdout`; `gitStatus` empty-string ambiguity (clean repo vs not-a-repo vs git-not-installed all collapse to ''). All v1-acceptable.
+> - `reactLoop.ts` `pendingCalls` deduplication — trust StreamEvent contract for v1; add guard in v2 once real-world adapter behavior is confirmed.
+> - `reactLoop.ts` artifact preview sanitization — preview can contain DSML markup; LLMs handle arbitrary text robustly so v1 acceptable.
+> - `QueryEngine.snapshot()` returns shallow copy; callers can mutate `Message` objects. Deep-freeze or typed readonly wrapper for v2.
+> - `prepareRequest` recomputes the budget verdict on every call. v2 may cache.
+> - `applyR2` future-proofing via spread+delete (instead of explicit reconstruction) — would auto-preserve hypothetical future `AssistantMessage` fields. Cosmetic.
+
+---
+
 ## Phase 10 — Terminal UI (Ink + Clack)
 
 ### Task 32: Logger that never writes to stdout while Ink is mounted (U4)

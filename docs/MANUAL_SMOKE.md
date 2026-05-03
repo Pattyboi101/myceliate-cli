@@ -23,10 +23,10 @@ CLI smoke (terminal B):
 - [ ] `.myceliate/history/<session>.md` is written and contains the turn log
 - [ ] `.myceliate/logs/session.log` is written and parses as JSON lines
 
-HITL smoke:
-- [ ] Prompt `"delete /tmp/foo recursively"` triggers the approval prompt
-- [ ] Pressing `n` rejects; the agent receives the rejection and recalibrates
-- [ ] Pressing `y` approves; the command (in a safe sandbox path) executes
+HITL smoke (DEFERRED — no bash tool registered in v1; these items will not trigger):
+- [ ] [DEFERRED — no bash tool in v1] Prompt `"delete /tmp/foo recursively"` triggers the approval prompt
+- [ ] [DEFERRED] Pressing `n` rejects; the agent receives the rejection and recalibrates
+- [ ] [DEFERRED] Pressing `y` approves; the command (in a safe sandbox path) executes
 
 Compaction smoke:
 - [ ] Set `WORKING_TOKEN_BUDGET=2000` and feed the agent a task that reads several files

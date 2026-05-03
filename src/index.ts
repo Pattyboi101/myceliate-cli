@@ -1,6 +1,6 @@
+// src/index.ts
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-// src/index.ts
 import { render } from 'ink';
 import React from 'react';
 import type { DeepSeekClient } from './adapters/DeepSeekClient.js';
@@ -66,43 +66,52 @@ async function main(): Promise<void> {
   let reasoningText = '';
   let contentText = '';
 
-  for await (const ev of runReactLoop({
-    client,
-    engine,
-    tools,
-    model: onboarding.model,
-    cwd: process.cwd(), // FIX #2: thread cwd explicitly to runReactLoop, even though it defaults to process.cwd() internally — entry point is the top-level configuration manifest, explicit DI is clearer to readers
-  })) {
-    if (ev.type === 'reasoning_delta') {
-      reasoningText += ev.text;
-      state = {
-        ...state,
-        reasoning: { text: reasoningText, phase: 'streaming', startedAtMs: reasonStartedAt },
-      };
-    } else if (ev.type === 'content_delta') {
-      if (state.reasoning && state.reasoning.phase === 'streaming') {
-        state = { ...state, reasoning: { ...state.reasoning, phase: 'complete' } };
+  // try/finally ensures ink.unmount + logger.flush fire even if runReactLoop or
+  // QueryEngine.prepareRequest throws (notably CompactionRefusal at low WORKING_TOKEN_BUDGET).
+  // Without this, console.error in main().catch would write to stderr while Ink is still
+  // mounted — ANSI corruption, violating U4. On crash mid-loop we lose unflushed assistant
+  // turns but keep the initial user turn already written via appendTurn above, consistent
+  // with FIX #3's crash-safety stance.
+  try {
+    for await (const ev of runReactLoop({
+      client,
+      engine,
+      tools,
+      model: onboarding.model,
+      cwd: process.cwd(), // FIX #2: thread cwd explicitly to runReactLoop, even though it defaults to process.cwd() internally — entry point is the top-level configuration manifest, explicit DI is clearer to readers
+    })) {
+      if (ev.type === 'reasoning_delta') {
+        reasoningText += ev.text;
+        state = {
+          ...state,
+          reasoning: { text: reasoningText, phase: 'streaming', startedAtMs: reasonStartedAt },
+        };
+      } else if (ev.type === 'content_delta') {
+        if (state.reasoning && state.reasoning.phase === 'streaming') {
+          state = { ...state, reasoning: { ...state.reasoning, phase: 'complete' } };
+        }
+        contentText += ev.text;
+        state = { ...state, content: contentText };
+      } else if (ev.type === 'tool_call') {
+        logger.info({ event: 'tool_call', name: ev.name, id: ev.id });
+      } else if (ev.type === 'error') {
+        // FIX #1: ev.cause is typed `unknown` in streamEvent.ts:13 — must narrow before reading .message, otherwise won't typecheck under strict mode.
+        logger.error({
+          event: 'stream_error',
+          message: ev.cause instanceof Error ? ev.cause.message : String(ev.cause),
+        });
       }
-      contentText += ev.text;
-      state = { ...state, content: contentText };
-    } else if (ev.type === 'tool_call') {
-      logger.info({ event: 'tool_call', name: ev.name, id: ev.id });
-    } else if (ev.type === 'error') {
-      // FIX #1: ev.cause is typed `unknown` in streamEvent.ts:13 — must narrow before reading .message, otherwise won't typecheck under strict mode.
-      logger.error({
-        event: 'stream_error',
-        message: ev.cause instanceof Error ? ev.cause.message : String(ev.cause),
-      });
+      ink.rerender(React.createElement(App, { state }));
     }
-    ink.rerender(React.createElement(App, { state }));
-  }
 
-  // FIX #3: snapshot().slice(1) skips the initial user turn that was already written via appendTurn above.
-  // This preserves crash-safety: if the ReAct loop crashes mid-stream, the user prompt is still on disk.
-  // The tradeoff (slightly uglier slice) is accepted because Markdown files are the definitive source of truth.
-  for (const m of engine.snapshot().slice(1)) await conversation.appendTurn(m);
-  await logger.flush();
-  ink.unmount();
+    // FIX #3: snapshot().slice(1) skips the initial user turn that was already written via appendTurn above.
+    // This preserves crash-safety: if the ReAct loop crashes mid-stream, the user prompt is still on disk.
+    // The tradeoff (slightly uglier slice) is accepted because Markdown files are the definitive source of truth.
+    for (const m of engine.snapshot().slice(1)) await conversation.appendTurn(m);
+  } finally {
+    await logger.flush();
+    ink.unmount();
+  }
 }
 
 main().catch((err) => {

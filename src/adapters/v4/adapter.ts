@@ -1,3 +1,4 @@
+import { redactJsonLeaves, redactSecrets } from '../../security/redactor.js';
 import { openSseConnection, parseSseStream } from '../../transport/sseClient.js';
 import type { FetchInit } from '../../transport/sseClient.js';
 import type { ChatRequest, DeepSeekClient } from '../DeepSeekClient.js';
@@ -56,15 +57,22 @@ export function buildRequestBody(req: ChatRequest): Record<string, unknown> {
  * For assistant turns with tool_calls, the tool_calls are re-serialised as
  * DSML markup appended to the content field for V4 context continuity.
  * Top-level export per Phase-2 lesson: helpers are module-level, not instance methods.
+ *
+ * R11: every outbound payload is run through `redactSecrets` before transmission.
+ * Tool-call args are leaf-redacted **before** DSML assembly so the env_value
+ * pattern's greedy `\S+` cannot run past a `</param>` close marker and corrupt
+ * the wire shape. The prefix `m.content` and `reasoning_content` are redacted
+ * as plain strings; tool result `content` is redacted on egress.
  */
 export function serializeMessage(m: Message): unknown {
   switch (m.role) {
     case 'system':
     case 'user':
-      return { role: m.role, content: m.content };
+      return { role: m.role, content: redactSecrets(m.content) };
     case 'assistant': {
-      const out: Record<string, unknown> = { role: 'assistant', content: m.content };
-      if (m.reasoning_content) out.reasoning_content = m.reasoning_content;
+      const prefix = m.content === null ? null : redactSecrets(m.content);
+      const out: Record<string, unknown> = { role: 'assistant', content: prefix };
+      if (m.reasoning_content) out.reasoning_content = redactSecrets(m.reasoning_content);
       if (m.tool_calls) {
         // V4 expects historical tool_calls re-serialized as DSML markup in content
         // for context continuity. This differs from V3 which uses a tool_calls array.
@@ -72,15 +80,19 @@ export function serializeMessage(m: Message): unknown {
         const dsml = `<|DSML|tool_calls>${m.tool_calls
           .map(
             (tc) =>
-              `<call id="${escapeXml(tc.id)}" name="${escapeXml(tc.name)}">${serializeArgs(tc.args)}</call>`,
+              `<call id="${escapeXml(tc.id)}" name="${escapeXml(tc.name)}">${serializeArgs(redactJsonLeaves(tc.args))}</call>`,
           )
           .join('')}</|DSML|tool_calls>`;
-        out.content = `${m.content ?? ''}${dsml}`;
+        out.content = `${prefix ?? ''}${dsml}`;
       }
       return out;
     }
     case 'tool':
-      return { role: 'tool', tool_call_id: m.result.tool_use_id, content: m.result.content };
+      return {
+        role: 'tool',
+        tool_call_id: m.result.tool_use_id,
+        content: redactSecrets(m.result.content),
+      };
   }
 }
 

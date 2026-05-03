@@ -1,3 +1,4 @@
+import { redactJsonLeaves, redactSecrets } from '../../security/redactor.js';
 import { openSseConnection, parseSseStream } from '../../transport/sseClient.js';
 import type { FetchInit } from '../../transport/sseClient.js';
 import type { ChatRequest, DeepSeekClient } from '../DeepSeekClient.js';
@@ -78,25 +79,39 @@ function buildRequestBody(req: ChatRequest): Record<string, unknown> {
  * Serialises a canonical Message into the OpenAI wire shape that V3 accepts.
  * Top-level export so V4's adapter can reuse it (V4 messages are 80%+ identical;
  * only the assistant body differs in DSML emission).
+ *
+ * R11: every outbound payload is run through `redactSecrets` before transmission.
+ * For tool-call args, redaction is applied per leaf string before JSON.stringify
+ * so the wire envelope (quotes, braces) is preserved intact — see `redactJsonLeaves`.
  */
 export function serializeMessage(m: Message): unknown {
   switch (m.role) {
     case 'system':
     case 'user':
-      return { role: m.role, content: m.content };
+      return { role: m.role, content: redactSecrets(m.content) };
     case 'assistant': {
-      const out: Record<string, unknown> = { role: 'assistant', content: m.content };
-      if (m.reasoning_content) out.reasoning_content = m.reasoning_content;
+      const out: Record<string, unknown> = {
+        role: 'assistant',
+        content: m.content === null ? null : redactSecrets(m.content),
+      };
+      if (m.reasoning_content) out.reasoning_content = redactSecrets(m.reasoning_content);
       if (m.tool_calls) {
         out.tool_calls = m.tool_calls.map((tc) => ({
           id: tc.id,
           type: 'function',
-          function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+          function: {
+            name: tc.name,
+            arguments: JSON.stringify(redactJsonLeaves(tc.args)),
+          },
         }));
       }
       return out;
     }
     case 'tool':
-      return { role: 'tool', tool_call_id: m.result.tool_use_id, content: m.result.content };
+      return {
+        role: 'tool',
+        tool_call_id: m.result.tool_use_id,
+        content: redactSecrets(m.result.content),
+      };
   }
 }

@@ -46,3 +46,28 @@ export function redactSecrets(input: string): string {
   }
   return out;
 }
+
+/**
+ * Recursively redact every string leaf in a JSON-shaped value.
+ *
+ * Used by adapter `serializeMessage` paths to redact tool-call args without
+ * corrupting the wire envelope. Naive whole-string redaction
+ * (`redactSecrets(JSON.stringify(args))`) is unsafe: the env_value pattern's
+ * trailing `\S+` is greedy and would consume the closing `"` / `}` / `]` of the
+ * surrounding JSON, producing invalid wire shape. Walking leaves restricts the
+ * regex's window to the raw string body of each value.
+ *
+ * Non-string leaves (numbers, booleans, null, undefined) are returned as-is.
+ */
+export function redactJsonLeaves(value: unknown): unknown {
+  if (typeof value === 'string') return redactSecrets(value);
+  if (Array.isArray(value)) return value.map(redactJsonLeaves);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = redactJsonLeaves(v);
+    }
+    return out;
+  }
+  return value;
+}

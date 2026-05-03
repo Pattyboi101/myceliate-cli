@@ -240,6 +240,72 @@ describe('V4Adapter', () => {
     expect(contentTexts.join('')).toBe('hello tail<|D');
   });
 
+  // ── R11: egress redaction wired through V4 serializeMessage ──────────────
+  it('redacts secrets in system/user/assistant/tool message content before transmission', async () => {
+    const opener = vi.fn().mockResolvedValue(fixture());
+    const adapter = new V4Adapter({ apiKey: 'k', baseUrl: 'x', openSse: opener });
+    const jwt =
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+    await collect(
+      adapter.stream({
+        model: 'm',
+        messages: [
+          { role: 'system', content: 'creds: sk-proj-abc123def456ghi789jklmnopqrstuvwxyzabc' },
+          { role: 'user', content: `token: ${jwt}` },
+          {
+            role: 'assistant',
+            content: 'leaked sk-proj-aaa111bbb222ccc333ddd444eee555fff666',
+            reasoning_content: 'planning DATABASE_URL=postgres://u:p@host/db',
+            tool_calls: [
+              {
+                id: 't1',
+                name: 'shell',
+                args: { cmd: 'echo API_KEY=topsecret123abc' },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            result: {
+              tool_use_id: 't1',
+              command: 'shell',
+              is_error: false,
+              content: 'output: sk-proj-xyz789aaa111bbb222ccc333ddd444eee555',
+            },
+          },
+        ],
+        thinking: true,
+        strict: true,
+      }),
+    );
+    const messages = (opener.mock.calls[0]?.[0].body as { messages: unknown[] }).messages as Array<
+      Record<string, unknown>
+    >;
+    // System content
+    expect(messages[0]?.content).not.toContain('sk-proj-abc123');
+    expect(messages[0]?.content).toContain('[REDACTED:openai_key]');
+    // User content (JWT)
+    expect(messages[1]?.content).not.toContain(jwt);
+    expect(messages[1]?.content).toContain('[REDACTED:jwt]');
+    // Assistant content has DSML markup AND prefix — secret in prefix redacted, DSML wire shape preserved
+    const assistantContent = messages[2]?.content as string;
+    expect(assistantContent).not.toContain('sk-proj-aaa111');
+    expect(assistantContent).toContain('[REDACTED:openai_key]');
+    // DSML markup intact (shape preservation)
+    expect(assistantContent).toContain('<|DSML|tool_calls>');
+    expect(assistantContent).toContain('</|DSML|tool_calls>');
+    expect(assistantContent).toContain('<call id="t1" name="shell">');
+    // The arg containing API_KEY=... was redacted inside the <param> body
+    expect(assistantContent).toContain('API_KEY=[REDACTED:env_value]');
+    expect(assistantContent).not.toContain('topsecret123abc');
+    // reasoning_content redacted
+    expect(messages[2]?.reasoning_content).toContain('DATABASE_URL=[REDACTED:env_value]');
+    expect(messages[2]?.reasoning_content).not.toContain('postgres://u:p@host/db');
+    // Tool result content redacted
+    expect(messages[3]?.content).not.toContain('sk-proj-xyz789');
+    expect(messages[3]?.content).toContain('[REDACTED:openai_key]');
+  });
+
   // ── Round-trip: assistant DSML re-emission parses back to original args ────
   it('serialised assistant tool_calls round-trip through the parser', async () => {
     const opener = vi.fn().mockResolvedValue(fixture());

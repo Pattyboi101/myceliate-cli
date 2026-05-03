@@ -166,4 +166,70 @@ describe('V3Adapter', () => {
     );
     expect(events.map((e) => e.type)).toEqual(['content_delta', 'error']);
   });
+
+  // ── R11: egress redaction wired through serializeMessage ──────────────────
+  it('redacts secrets in system/user/assistant/tool message content before transmission', async () => {
+    const opener = vi.fn().mockResolvedValue(sseFixture());
+    const adapter = new V3Adapter({ apiKey: 'k', baseUrl: 'x', openSse: opener });
+    const jwt =
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+    await collect(
+      adapter.stream({
+        model: 'm',
+        messages: [
+          { role: 'system', content: 'creds: sk-proj-abc123def456ghi789jklmnopqrstuvwxyzabc' },
+          { role: 'user', content: `token: ${jwt}` },
+          {
+            role: 'assistant',
+            content: 'leaked sk-proj-aaa111bbb222ccc333ddd444eee555fff666',
+            reasoning_content: 'planning DATABASE_URL=postgres://u:p@host/db',
+            tool_calls: [
+              {
+                id: 't1',
+                name: 'shell',
+                args: { cmd: 'echo API_KEY=topsecret123abc' },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            result: {
+              tool_use_id: 't1',
+              command: 'shell',
+              is_error: false,
+              content: 'output: sk-proj-xyz789aaa111bbb222ccc333ddd444eee555',
+            },
+          },
+        ],
+        thinking: true,
+        strict: true,
+      }),
+    );
+    const messages = (opener.mock.calls[0]?.[0].body as { messages: unknown[] }).messages as Array<
+      Record<string, unknown>
+    >;
+    // System message — openai_key redacted
+    expect(messages[0]?.content).not.toContain('sk-proj-abc123');
+    expect(messages[0]?.content).toContain('[REDACTED:openai_key]');
+    // User message — JWT redacted
+    expect(messages[1]?.content).not.toContain(jwt);
+    expect(messages[1]?.content).toContain('[REDACTED:jwt]');
+    // Assistant content + reasoning_content redacted
+    expect(messages[2]?.content).not.toContain('sk-proj-aaa111');
+    expect(messages[2]?.content).toContain('[REDACTED:openai_key]');
+    expect(messages[2]?.reasoning_content).toContain('DATABASE_URL=[REDACTED:env_value]');
+    expect(messages[2]?.reasoning_content).not.toContain('postgres://u:p@host/db');
+    // tool_calls.function.arguments — wire shape preserved (still a JSON string), secret redacted
+    const toolCalls = messages[2]?.tool_calls as Array<{
+      function: { arguments: string };
+    }>;
+    expect(typeof toolCalls[0]?.function.arguments).toBe('string');
+    expect(toolCalls[0]?.function.arguments).toContain('API_KEY=[REDACTED:env_value]');
+    expect(toolCalls[0]?.function.arguments).not.toContain('topsecret123abc');
+    // arguments is still parseable JSON (shape preservation)
+    expect(() => JSON.parse(toolCalls[0]?.function.arguments ?? '')).not.toThrow();
+    // tool result content redacted
+    expect(messages[3]?.content).not.toContain('sk-proj-xyz789');
+    expect(messages[3]?.content).toContain('[REDACTED:openai_key]');
+  });
 });

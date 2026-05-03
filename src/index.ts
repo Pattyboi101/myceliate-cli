@@ -9,7 +9,7 @@ import { V4Adapter } from './adapters/v4/adapter.js';
 import { ConversationLog } from './memory/conversationLog.js';
 import { MarkdownStore } from './memory/markdownStore.js';
 import { QueryEngine } from './orchestrator/QueryEngine.js';
-import { senseContext } from './orchestrator/context.js';
+import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { runReactLoop } from './orchestrator/reactLoop.js';
 import { grepTool } from './tools/grep.js';
 import { listDirTool } from './tools/listDir.js';
@@ -48,7 +48,8 @@ async function main(): Promise<void> {
   tools.register(grepTool);
 
   const engine = new QueryEngine({
-    systemPrompt: ctx.claudeMd || 'You are myceliate, an autonomous CLI agent.',
+    // F5: include senseContext's gitStatus + dirEntries as session ground truth.
+    systemPrompt: buildSystemPrompt(ctx),
     workingBudget: Number(process.env.WORKING_TOKEN_BUDGET ?? 200_000),
   });
   engine.appendUser(onboarding.initialPrompt);

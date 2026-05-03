@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { senseContext } from '../../../src/orchestrator/context.js';
+import { buildSystemPrompt, senseContext } from '../../../src/orchestrator/context.js';
 
 let tmp: string;
 beforeEach(async () => {
@@ -69,5 +69,55 @@ describe('senseContext', () => {
       gitStatus: '',
       dirEntries: [],
     });
+  });
+});
+
+describe('buildSystemPrompt', () => {
+  // F5: gitStatus and dirEntries are now wired into the system prompt as
+  // session ground truth. Previously senseContext populated them on every
+  // session start but src/index.ts only consumed claudeMd + memoryDir.
+  it('includes git porcelain output and cwd entries in the assembled prompt', () => {
+    const prompt = buildSystemPrompt({
+      cwd: '/tmp/x',
+      claudeMd: '# project rules',
+      memoryDir: '/tmp/x/.myceliate',
+      gitStatus: ' M src/foo.ts\n?? new.ts',
+      dirEntries: ['a.ts', 'b.ts', 'README.md'],
+    });
+    expect(prompt).toContain('# project rules');
+    expect(prompt).toContain('## session ground truth');
+    expect(prompt).toContain('git status:');
+    expect(prompt).toContain(' M src/foo.ts');
+    expect(prompt).toContain('?? new.ts');
+    expect(prompt).toContain('cwd entries: a.ts, b.ts, README.md');
+  });
+
+  it('substitutes a fallback prompt when claudeMd is empty', () => {
+    const prompt = buildSystemPrompt({
+      cwd: '/tmp/x',
+      claudeMd: '',
+      memoryDir: '/tmp/x/.myceliate',
+      gitStatus: '',
+      dirEntries: [],
+    });
+    expect(prompt).toContain('You are myceliate, an autonomous CLI agent.');
+    // Empty git status renders as the explicit "(clean / not a repo)" hint.
+    expect(prompt).toContain('(clean / not a repo)');
+    expect(prompt).toContain('cwd entries: ');
+  });
+
+  it('caps oversize dirEntries at 50 with an ellipsis tail', () => {
+    const dirEntries = Array.from({ length: 75 }, (_, i) => `f${i}.ts`);
+    const prompt = buildSystemPrompt({
+      cwd: '/tmp/x',
+      claudeMd: '',
+      memoryDir: '/tmp/x/.myceliate',
+      gitStatus: '',
+      dirEntries,
+    });
+    expect(prompt).toContain('f0.ts');
+    expect(prompt).toContain('f49.ts');
+    expect(prompt).not.toContain('f50.ts');
+    expect(prompt).toContain('...');
   });
 });

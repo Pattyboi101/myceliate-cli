@@ -6,11 +6,6 @@ vi.mock('@clack/prompts', () => ({
   cancel: vi.fn(),
   isCancel: () => false,
   password: vi.fn(async (_opts: { message: string }) => 'sk-test-1234567890abcdef'),
-  text: vi.fn(async (opts: { message: string }) => {
-    if (opts.message.includes('API key')) return 'sk-test-1234567890abcdef';
-    if (opts.message.includes('agent to do')) return 'do thing';
-    return 'fallback';
-  }),
   select: vi.fn(async () => 'v3'),
 }));
 
@@ -21,13 +16,12 @@ describe('runOnboarding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
-  it('collects apiKey, adapter, model, initialPrompt with defaults applied', async () => {
+  it('collects apiKey, adapter, model with defaults applied', async () => {
     const result = await runOnboarding({});
     expect(result).toEqual({
       apiKey: 'sk-test-1234567890abcdef',
       adapter: 'v3',
       model: 'deepseek-reasoner',
-      initialPrompt: 'do thing',
     });
   });
   it('skips prompts when defaults are provided', async () => {
@@ -51,10 +45,14 @@ describe('runOnboarding', () => {
     expect(typeof passwordCall.validate).toBe('function');
     expect(passwordCall.validate('short')).toBe('API key looks too short');
     expect(passwordCall.validate('this-is-long-enough-1234567890')).toBeUndefined();
-    // text() is only used for the non-secret prompts (initialPrompt — model/adapter use select).
-    const textCalls = (clack.text as ReturnType<typeof vi.fn>).mock.calls;
-    for (const [opts] of textCalls) {
-      expect((opts as { message: string }).message).not.toContain('API key');
-    }
+  });
+  // Phase 12.5: the initial-prompt Clack `text()` was removed so the chat-style
+  // start lands the user in <PromptInput> immediately. Lock the regression in.
+  it('does not invoke text() at all — chat-style start owns the first prompt', async () => {
+    await runOnboarding({});
+    // text() isn't even imported by onboarding.ts anymore. The result should not
+    // contain `initialPrompt`.
+    const result = await runOnboarding({});
+    expect((result as Record<string, unknown>).initialPrompt).toBeUndefined();
   });
 });

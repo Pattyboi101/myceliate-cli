@@ -50,13 +50,22 @@ async function main(): Promise<void> {
   tools.register(listDirTool);
   tools.register(grepTool);
 
+  // Phase 12.5: mount Ink straight into `awaiting_input` so the banner +
+  // PromptInput render before the user submits anything. Removes the Clack
+  // "What would you like the agent to do?" interrupt and gives the chat-like
+  // start Patrick wanted.
   let state: AppState = {
-    userInput: onboarding.initialPrompt,
+    userInput: '',
     reasoning: null,
     content: '',
     approvalRequest: null,
-    phase: 'streaming',
+    phase: 'awaiting_input',
     turns: [],
+  };
+  const banner = {
+    model: onboarding.model,
+    adapter: onboarding.adapter,
+    cwd: process.cwd(),
   };
   let promptResolver: ((value: string) => void) | null = null;
   const onPromptSubmit = (text: string): void => {
@@ -66,10 +75,10 @@ async function main(): Promise<void> {
       r(text);
     }
   };
-  const ink = render(React.createElement(App, { state, onPromptSubmit }));
+  const ink = render(React.createElement(App, { state, banner, onPromptSubmit }));
   const rerender = (next: AppState): void => {
     state = next;
-    ink.rerender(React.createElement(App, { state, onPromptSubmit }));
+    ink.rerender(React.createElement(App, { state, banner, onPromptSubmit }));
   };
 
   // Per-turn streaming buffers (reset on each `turn_complete` and at the top of
@@ -77,12 +86,10 @@ async function main(): Promise<void> {
   let reasonStartedAt = Date.now();
   let reasoningText = '';
   let contentText = '';
-  let firstPromptConsumed = false;
-  // Phase 12 review M1 fix: track how many engine messages have already been
-  // flushed to disk so onTurnComplete can append only the delta. The initial
-  // user prompt is written eagerly in readNextPrompt below (Phase 11 FIX #3
-  // crash-safety), so this starts at 1.
-  let lastSnapshotLen = 1;
+  // Phase 12.5: every prompt now arrives via PromptInput, so there's no
+  // pre-loop user message. lastSnapshotLen starts at 0 and tracks the conv-log
+  // delta from there.
+  let lastSnapshotLen = 0;
 
   try {
     await runReplSession({
@@ -144,13 +151,8 @@ async function main(): Promise<void> {
           turns,
         });
       },
-      readNextPrompt: async () => {
-        if (!firstPromptConsumed) {
-          firstPromptConsumed = true;
-          await conversation.appendTurn({ role: 'user', content: onboarding.initialPrompt });
-          return onboarding.initialPrompt;
-        }
-        return new Promise<string>((resolve) => {
+      readNextPrompt: async () =>
+        new Promise<string>((resolve) => {
           promptResolver = resolve;
         }).then((text) => {
           rerender({
@@ -162,8 +164,7 @@ async function main(): Promise<void> {
             turns: state.turns,
           });
           return text;
-        });
-      },
+        }),
     });
   } finally {
     await logger.flush();

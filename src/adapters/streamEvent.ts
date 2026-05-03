@@ -18,7 +18,25 @@ export type StreamEvent =
    * to reset per-turn UI state (reasoning text, started-at timestamp, etc.)
    * so turn 2's reasoning panel does not concatenate onto turn 1's. See F4.
    */
-  | { type: 'turn_complete' };
+  | { type: 'turn_complete' }
+  /**
+   * Synthetic lifecycle event yielded by `runReactLoop` when a tool call
+   * resolves, rejects, or is vetoed by the HITL gate. Adapters never emit it
+   * (case is added to their switches for exhaustiveness only). The `id`
+   * matches the originating `tool_call.id` so the UI can map status updates
+   * onto rendered cards. `durationMs` measures only `tools.invoke` wall time
+   * (not orchestrator overhead). `preview` is the redacted, truncated head
+   * of the result content (≤200 chars). `cause` is set on failures for
+   * structured surfacing in the UI.
+   */
+  | {
+      type: 'tool_result';
+      id: string;
+      status: 'completed' | 'failed' | 'rejected';
+      durationMs: number;
+      preview?: string;
+      cause?: unknown;
+    };
 
 export const isReasoningDelta = (
   e: StreamEvent,
@@ -32,3 +50,5 @@ export const isDone = (e: StreamEvent): e is Extract<StreamEvent, { type: 'done'
   e.type === 'done';
 export const isError = (e: StreamEvent): e is Extract<StreamEvent, { type: 'error' }> =>
   e.type === 'error';
+export const isToolResult = (e: StreamEvent): e is Extract<StreamEvent, { type: 'tool_result' }> =>
+  e.type === 'tool_result';

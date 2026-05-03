@@ -86,25 +86,31 @@ export class QueryEngine {
   }): ChatRequest {
     let working: Message[] = [...this.history];
     const verdict = this.checker.check(working);
-    if (verdict.action === 'prune' || verdict.action === 'snip' || verdict.action === 'micro') {
+
+    // R10: any non-'none' verdict (including 'refuse') runs layers 1–3 in
+    // order. Refusing without trying inverts the escalation ladder — a single
+    // oversized tool result that lands directly in the 'refuse' band would
+    // otherwise be rejected without L1's truncation ever firing. Re-evaluate
+    // the budget after compaction; only refuse if usage is *still* >= refusal
+    // threshold once layers 1–3 have done their best.
+    if (verdict.action !== 'none') {
       working = pruneToolOutputs(working, {
         maxToolOutputChars: this.opts.maxToolOutputChars,
         protectedTailMessages: this.opts.protectedTailMessages,
       });
-    }
-    if (verdict.action === 'snip' || verdict.action === 'micro') {
       working = snipDeadEnds(working, { protectedTailTokens: this.opts.protectedTailTokens });
-    }
-    if (verdict.action === 'micro') {
       working = microCompact(working, { protectedTailMessages: this.opts.protectedTailMessages });
+
+      const post = this.checker.check(working);
+      if (post.action === 'refuse') {
+        const err = new Error(
+          'compaction_required: working budget exhausted (layers 1-3 insufficient; layers 4-5 deferred to v2)',
+        ) as CompactionRefusal;
+        err.kind = 'compaction_refused';
+        throw err;
+      }
     }
-    if (verdict.action === 'refuse') {
-      const err = new Error(
-        'compaction_required: working budget exhausted (layers 1-3 insufficient; layers 4-5 deferred to v2)',
-      ) as CompactionRefusal;
-      err.kind = 'compaction_refused';
-      throw err;
-    }
+
     const messages: Message[] = [this.system, ...this.applyR2(working)];
     return {
       model: args.model,

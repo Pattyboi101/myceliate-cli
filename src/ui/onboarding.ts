@@ -1,24 +1,14 @@
 // src/ui/onboarding.ts
-import { cancel, intro, isCancel, outro, password, select, text } from '@clack/prompts';
+import { cancel, intro, isCancel, outro, password, select } from '@clack/prompts';
 
 export type OnboardingResult = {
   apiKey: string;
   adapter: 'v3' | 'v4';
   model: string;
-  initialPrompt: string;
 };
 
-async function promptText(opts: Parameters<typeof text>[0]): Promise<string> {
-  const result = await text(opts);
-  if (isCancel(result)) {
-    cancel('Aborted.');
-    process.exit(0);
-  }
-  return result;
-}
-
 /**
- * Masked variant of `promptText`. Used for secrets (API key) so keystrokes
+ * Masked variant of the secret prompt. Used for the API key so keystrokes
  * don't echo to the terminal and survive in scrollback / tmux / ssh recordings.
  */
 async function promptPassword(opts: Parameters<typeof password>[0]): Promise<string> {
@@ -42,6 +32,12 @@ async function promptSelect<T extends string>(opts: {
   return result as T;
 }
 
+/**
+ * Pre-Ink onboarding via Clack. Collects only credentials/configuration —
+ * the initial user prompt now arrives via Ink's <PromptInput> after the
+ * banner mounts (Phase 12.5: chat-style start, no Clack interrupt before
+ * the TUI).
+ */
 export async function runOnboarding(defaults: {
   apiKey?: string;
   adapter?: 'v3' | 'v4';
@@ -68,8 +64,6 @@ export async function runOnboarding(defaults: {
 
   const model = defaults.model ?? (adapter === 'v3' ? 'deepseek-reasoner' : 'deepseek-v4-pro');
 
-  const initialPrompt = await promptText({ message: 'What would you like the agent to do?' });
-
-  outro('Starting agent…');
-  return { apiKey, adapter, model, initialPrompt };
+  outro('Launching agent…');
+  return { apiKey, adapter, model };
 }

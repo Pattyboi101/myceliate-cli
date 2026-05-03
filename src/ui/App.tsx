@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type React from 'react';
 import type { ApprovalRequest, ApprovalResponse } from '../security/hitlGate.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
+import { Banner, type BannerInfo } from './Banner.js';
 import { ContentStream } from './ContentStream.js';
 import { PromptInput } from './PromptInput.js';
 import { ReasoningBlock } from './ReasoningBlock.js';
@@ -39,10 +40,13 @@ export type AppState = {
 
 export function App({
   state,
+  banner,
   onApprovalResponse,
   onPromptSubmit,
 }: {
   state: AppState;
+  /** Optional splash banner (model + adapter + cwd). Omitted in unit fixtures. */
+  banner?: BannerInfo;
   onApprovalResponse?: (r: ApprovalResponse) => void;
   onPromptSubmit?: (text: string) => void;
 }): React.JSX.Element {
@@ -55,6 +59,7 @@ export function App({
 
   return (
     <Box flexDirection="column" paddingX={1}>
+      {banner && <Banner {...banner} />}
       {state.turns.map((t, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: append-only log, indices are stable.
         <Box key={i} flexDirection="column" marginBottom={1}>

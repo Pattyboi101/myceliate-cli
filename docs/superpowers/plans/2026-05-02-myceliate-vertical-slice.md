@@ -5121,6 +5121,45 @@ git commit -m "feat(ui): Clack onboarding flow (apiKey, adapter, model, prompt)"
 
 ---
 
+> **Phase 10 review-iteration note:** Phase 10 (Tasks 32–39) shipped via single implementer subagent (commits `4f87cad`–`a19ca9b`), Biome cleanup pass (`b84eecd`), then two-stage parallel review (spec compliance + code quality) returning `PASS` / `MINOR FIXES RECOMMENDED`. Five review fixes plus six new tests applied inline (`ba13363`). Treat the code under `src/ui/`, `src/util/logger.ts`, and tests under `tests/unit/ui/`, `tests/unit/util/` as the source of truth.
+>
+> **Pre-approved plan deviations (applied during implementation):**
+>
+> - **Task 33 parser**: `m[1]!` non-null assertions replaced with explicit destructuring + `if (... === undefined) continue` guards (`src/ui/markdown/incrementalParser.ts:29-31`). Phase 4–9 no-`!` pattern preserved.
+> - **Task 36 ContentStream test**: plan's JSX `text="hello\n\n# H1\n\n"` was a string literal that didn't interpret `\n` (parser saw 14 literal characters; heading-lock path was not exercised — false-positive pass via substring match). Corrected to `text={'hello\n\n# H1\n\n'}` (`tests/unit/ui/ContentStream.test.tsx:11`) so real newlines reach the parser.
+> - **Task 39 onboarding**: plan's `(await text({...})) as string` cast replaced with `promptText`/`promptSelect<T>` helpers that internally narrow Clack's `string | symbol` return via `isCancel` and return clean `string`/`T` (`src/ui/onboarding.ts:11-30`). Eliminates the `as string` papering over the cancel-symbol union.
+> - **Task 39 additive test**: plan said no test (Clack reads stdin, requires TTY); we mocked `@clack/prompts` via `vi.mock` and added two assertion tests covering both default-applied and default-skipped paths (`tests/unit/ui/onboarding.test.ts`).
+>
+> **Implementer-applied additional fixes (defensible judgment calls during implementation):**
+>
+> - `src/ui/markdown/MarkdownRenderer.tsx:22`: `const dim = dimmed === true` narrows `boolean | undefined` → `boolean` for `exactOptionalPropertyTypes` on Ink's `dimColor` prop.
+> - `src/ui/onboarding.ts:22`: `Array<{ value: T; label: string }>` (mutable) instead of `ReadonlyArray` because Clack's `SelectOptions` requires mutable.
+> - `tests/unit/ui/onboarding.test.ts:10`: mock matcher `'agent to do'` matches `'What would you like the agent to do?'` reliably (initial `'would like'` was a non-contiguous substring).
+> - `src/ui/markdown/MarkdownRenderer.tsx:13`: `biome-ignore lint/suspicious/noArrayIndexKey` with rationale comment — completed blocks are append-only and never reordered, so index-as-key is stable.
+>
+> **Two-stage review fixes applied inline (commit `ba13363`):**
+>
+> - **M1 — Logger error-chain poisoning**: a single `mkdir`/`appendFile` rejection silently dropped all subsequent writes for the rest of the session, since `pending = pending.then(...)` left the chain in a rejected state. Wrapped with a trailing `.catch(() => {})` so the chain stays fulfilled; failing batches are dropped, not retried (`src/util/logger.ts:37-44`). Test: chain stays alive across two `flush()` calls under ENOTDIR.
+> - **m1 — Logger circular-reference throws**: `JSON.stringify` on a circular entry threw synchronously into the caller's fire-and-forget call. `safeStringify` wraps in try/catch and emits `{ msg: '[unserializable]' }` placeholder (`src/util/logger.ts:14-20`). Tests: no-throw + placeholder emitted.
+> - **m2 — Logger path traversal**: `opts.file` was unsanitised; a `'../escape.log'` argument escaped `logsDir`. `basename(opts.file ?? 'session.log')` strips path components (`src/util/logger.ts:24`). Test: `'../escape.log'` lands in `logsDir/escape.log`.
+> - **M2 — ApprovalPrompt double-fire**: `useInput` may receive multiple keypresses before React unmounts the component; HitlGate's Promise drops second resolves but the "exactly once per mount" contract was violated at the component layer. `useRef<boolean> firedRef` short-circuits after the first valid keypress (`src/ui/ApprovalPrompt.tsx:11-22`). Test: `y`/`y`/`n` stream fires once with `{ decision: 'approve' }`.
+> - **M3 — ReasoningBlock Tab-toggle unwired**: collapsed view advertised "press Tab to expand" but `App` never wired the handler — direct violation of CLAUDE.md U1 ("Toggleable via keyboard"). Added `useState<boolean>` for `reasoningExpanded` plus a `useInput` Tab handler in `App.tsx:24-27`, propagating `expanded` prop down to `ReasoningBlock`. Test: Tab toggles between collapsed and expanded frames; second Tab returns to collapsed.
+>
+> **Test-environment quirk worth knowing:** `ink-testing-library`'s `stdin` listener (`'readable'`) is attached inside Ink's `useEffect` via `setRawMode(true)`, which doesn't run until a microtask after `render()` returns. Tests that simulate keypresses must `await new Promise((r) => setTimeout(r, 50))` before the first `stdin.write(...)` to let the listener register, otherwise the keypress is dropped silently. Documented in `tests/unit/ui/{ApprovalPrompt,App}.test.tsx`.
+>
+> Tests: 254 → 272 unit (Tasks 32–39 + onboarding mock test, +18) → 278 unit (review fixes, +6). Typecheck and lint clean throughout.
+>
+> **Phase 10 follow-ups deferred to v2:**
+>
+> - `ContentStream` re-instantiates `IncrementalMarkdownParser` per render via `useMemo([text])`. Per-render is O(n) per the U2 contract; cumulative work over N chunks is O(n²). Plan-acknowledged tradeoff. v2: lift parser into `useRef` and feed only the delta.
+> - Logger I/O failures silently drop the failing batch. v2: optional `onError` hook so the orchestrator can surface failures (e.g., a UI banner via the alternate channel) without violating U4.
+> - `incrementalParser.ts` closes a code block on the first inline triple-backtick substring even inside streaming code (e.g. a string literal containing the fence). Plan-acknowledged limitation of the no-real-markdown-library choice.
+> - `App.tsx`'s `useInput` Tab handler also fires when `ApprovalPrompt` is mounted (Tab toggles reasoning even mid-approval). Harmless (Tab is not Y/N) but worth scoping later — possibly via `options.isActive`.
+> - `ReasoningBlock` renders negative `durationMs` as `-0.3s` on clock skew. Cosmetic.
+> - **R11 spec gap surfaced by spec reviewer (Phase 9 origin, not Phase 10 scope):** `CLAUDE.md` R11 promises `approve-once` and `reject-with-feedback` decisions, but `src/security/hitlGate.ts` `ApprovalResponse` type only exposes `approve`/`reject`. ApprovalPrompt correctly maps to the actual existing type. Closing the gap belongs in a v2 HITL refinement that extends both `ApprovalResponse` and the prompt's keyboard map.
+
+---
+
 ## Phase 11 — Wiring & Manual Smoke
 
 ### Task 40: `index.ts` — entry point wiring everything together

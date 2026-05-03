@@ -1,22 +1,25 @@
 // src/index.ts
+import { loadDotenv } from './runtime/dotenv.js';
+loadDotenv();
+
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { render } from 'ink';
 import React from 'react';
 import type { DeepSeekClient } from './adapters/DeepSeekClient.js';
+import type { StreamEvent } from './adapters/streamEvent.js';
 import { V3Adapter } from './adapters/v3/adapter.js';
 import { V4Adapter } from './adapters/v4/adapter.js';
 import { ConversationLog } from './memory/conversationLog.js';
 import { MarkdownStore } from './memory/markdownStore.js';
-import { QueryEngine } from './orchestrator/QueryEngine.js';
 import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
-import { runReactLoop } from './orchestrator/reactLoop.js';
+import { runReplSession } from './runtime/replSession.js';
 import { grepTool } from './tools/grep.js';
 import { listDirTool } from './tools/listDir.js';
 import { readFileTool } from './tools/readFile.js';
 import { ToolRegistry } from './tools/registry.js';
 import { writeFileTool } from './tools/writeFile.js';
-import { App, type AppState } from './ui/App.js';
+import { App, type AppState, type CompletedTurn } from './ui/App.js';
 import { runOnboarding } from './ui/onboarding.js';
 import { createLogger } from './util/logger.js';
 
@@ -47,84 +50,121 @@ async function main(): Promise<void> {
   tools.register(listDirTool);
   tools.register(grepTool);
 
-  const engine = new QueryEngine({
-    // F5: include senseContext's gitStatus + dirEntries as session ground truth.
-    systemPrompt: buildSystemPrompt(ctx),
-    workingBudget: Number(process.env.WORKING_TOKEN_BUDGET ?? 200_000),
-  });
-  engine.appendUser(onboarding.initialPrompt);
-  await conversation.appendTurn({ role: 'user', content: onboarding.initialPrompt });
-
   let state: AppState = {
     userInput: onboarding.initialPrompt,
     reasoning: null,
     content: '',
     approvalRequest: null,
+    phase: 'streaming',
+    turns: [],
   };
-  const ink = render(React.createElement(App, { state }));
+  let promptResolver: ((value: string) => void) | null = null;
+  const onPromptSubmit = (text: string): void => {
+    if (promptResolver) {
+      const r = promptResolver;
+      promptResolver = null;
+      r(text);
+    }
+  };
+  const ink = render(React.createElement(App, { state, onPromptSubmit }));
+  const rerender = (next: AppState): void => {
+    state = next;
+    ink.rerender(React.createElement(App, { state, onPromptSubmit }));
+  };
 
-  // F4: per-turn state. Reset on every `turn_complete` boundary so turn 2's
-  // reasoning panel does not concatenate onto turn 1, and turn 1's frozen
-  // duration does not bleed into turn 2's timer.
+  // Per-turn streaming buffers (reset on each `turn_complete` and at the top of
+  // every REPL iteration via the runReplSession `onState` callback below).
   let reasonStartedAt = Date.now();
   let reasoningText = '';
   let contentText = '';
+  let firstPromptConsumed = false;
+  // Phase 12 review M1 fix: track how many engine messages have already been
+  // flushed to disk so onTurnComplete can append only the delta. The initial
+  // user prompt is written eagerly in readNextPrompt below (Phase 11 FIX #3
+  // crash-safety), so this starts at 1.
+  let lastSnapshotLen = 1;
 
-  // try/finally ensures ink.unmount + logger.flush fire even if runReactLoop or
-  // QueryEngine.prepareRequest throws (notably CompactionRefusal at low WORKING_TOKEN_BUDGET).
-  // Without this, console.error in main().catch would write to stderr while Ink is still
-  // mounted — ANSI corruption, violating U4. On crash mid-loop we lose unflushed assistant
-  // turns but keep the initial user turn already written via appendTurn above, consistent
-  // with FIX #3's crash-safety stance.
   try {
-    for await (const ev of runReactLoop({
+    await runReplSession({
       client,
-      engine,
       tools,
       model: onboarding.model,
-      cwd: process.cwd(), // FIX #2: thread cwd explicitly to runReactLoop, even though it defaults to process.cwd() internally — entry point is the top-level configuration manifest, explicit DI is clearer to readers
-    })) {
-      if (ev.type === 'reasoning_delta') {
-        reasoningText += ev.text;
-        state = {
-          ...state,
-          reasoning: { text: reasoningText, phase: 'streaming', startedAtMs: reasonStartedAt },
-        };
-      } else if (ev.type === 'content_delta') {
-        if (state.reasoning && state.reasoning.phase === 'streaming') {
-          // F4: freeze the reasoning duration on phase transition. Without
-          // endedAtMs, App's `Date.now() - startedAtMs` keeps ticking while
-          // the content streams.
-          state = {
+      cwd: process.cwd(),
+      systemPrompt: buildSystemPrompt(ctx),
+      workingBudget: Number(process.env.WORKING_TOKEN_BUDGET ?? 200_000),
+      onState: (ev: StreamEvent) => {
+        if (ev.type === 'reasoning_delta') {
+          reasoningText += ev.text;
+          rerender({
             ...state,
-            reasoning: { ...state.reasoning, phase: 'complete', endedAtMs: Date.now() },
-          };
+            reasoning: { text: reasoningText, phase: 'streaming', startedAtMs: reasonStartedAt },
+          });
+        } else if (ev.type === 'content_delta') {
+          if (state.reasoning && state.reasoning.phase === 'streaming') {
+            rerender({
+              ...state,
+              reasoning: { ...state.reasoning, phase: 'complete', endedAtMs: Date.now() },
+            });
+          }
+          contentText += ev.text;
+          rerender({ ...state, content: contentText });
+        } else if (ev.type === 'tool_call') {
+          logger.info({ event: 'tool_call', name: ev.name, id: ev.id });
+        } else if (ev.type === 'turn_complete') {
+          reasoningText = '';
+          contentText = '';
+          reasonStartedAt = Date.now();
+          rerender({ ...state, reasoning: null, content: '' });
+        } else if (ev.type === 'error') {
+          logger.error({
+            event: 'stream_error',
+            message: ev.cause instanceof Error ? ev.cause.message : String(ev.cause),
+          });
         }
-        contentText += ev.text;
-        state = { ...state, content: contentText };
-      } else if (ev.type === 'tool_call') {
-        logger.info({ event: 'tool_call', name: ev.name, id: ev.id });
-      } else if (ev.type === 'turn_complete') {
-        // F4: reset per-turn buffers and timestamps. The next turn's
-        // reasoning_delta arrives with a clean slate.
+      },
+      onTurnComplete: async (snapshot) => {
+        // Phase 12 review M1 fix: append only the delta since the last flush.
+        // Previous heuristic (state.turns.length === 0 && firstPromptConsumed
+        // ? 1 : 0) re-wrote turn 1 on every subsequent turn, duplicating
+        // history entries. Tracking lastSnapshotLen instead is unconditional
+        // and correct across any turn count.
+        for (const m of snapshot.slice(lastSnapshotLen)) await conversation.appendTurn(m);
+        lastSnapshotLen = snapshot.length;
+        const newTurn: CompletedTurn = { userInput: state.userInput, content: contentText };
+        const turns = [...state.turns, newTurn];
+        // Reset live region; show prompt input for next turn.
         reasoningText = '';
         contentText = '';
-        reasonStartedAt = Date.now();
-        state = { ...state, reasoning: null, content: '' };
-      } else if (ev.type === 'error') {
-        // FIX #1: ev.cause is typed `unknown` in streamEvent.ts:13 — must narrow before reading .message, otherwise won't typecheck under strict mode.
-        logger.error({
-          event: 'stream_error',
-          message: ev.cause instanceof Error ? ev.cause.message : String(ev.cause),
+        rerender({
+          userInput: '',
+          reasoning: null,
+          content: '',
+          approvalRequest: null,
+          phase: 'awaiting_input',
+          turns,
         });
-      }
-      ink.rerender(React.createElement(App, { state }));
-    }
-
-    // FIX #3: snapshot().slice(1) skips the initial user turn that was already written via appendTurn above.
-    // This preserves crash-safety: if the ReAct loop crashes mid-stream, the user prompt is still on disk.
-    // The tradeoff (slightly uglier slice) is accepted because Markdown files are the definitive source of truth.
-    for (const m of engine.snapshot().slice(1)) await conversation.appendTurn(m);
+      },
+      readNextPrompt: async () => {
+        if (!firstPromptConsumed) {
+          firstPromptConsumed = true;
+          await conversation.appendTurn({ role: 'user', content: onboarding.initialPrompt });
+          return onboarding.initialPrompt;
+        }
+        return new Promise<string>((resolve) => {
+          promptResolver = resolve;
+        }).then((text) => {
+          rerender({
+            userInput: text,
+            reasoning: null,
+            content: '',
+            approvalRequest: null,
+            phase: 'streaming',
+            turns: state.turns,
+          });
+          return text;
+        });
+      },
+    });
   } finally {
     await logger.flush();
     ink.unmount();

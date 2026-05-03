@@ -4,6 +4,33 @@ import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { App, type AppState } from '../../../src/ui/App.js';
 
+it('renders <PromptInput> when phase is awaiting_input', () => {
+  const state: AppState = {
+    userInput: '',
+    reasoning: null,
+    content: '',
+    approvalRequest: null,
+    phase: 'awaiting_input',
+    turns: [],
+  };
+  const { lastFrame } = render(<App state={state} />);
+  // PromptInput renders the gray block-cursor glyph as its visible marker.
+  expect(lastFrame()).toContain('▎');
+});
+
+it('hides <PromptInput> while streaming', () => {
+  const state: AppState = {
+    userInput: 'hi',
+    reasoning: null,
+    content: 'partial answer',
+    approvalRequest: null,
+    phase: 'streaming',
+    turns: [],
+  };
+  const { lastFrame } = render(<App state={state} />);
+  expect(lastFrame()).not.toContain('▎');
+});
+
 describe('App', () => {
   it('renders the reasoning block above the content stream', () => {
     const state: AppState = {
@@ -11,6 +38,8 @@ describe('App', () => {
       reasoning: { text: 'thinking', phase: 'streaming', startedAtMs: Date.now() },
       content: 'partial answer',
       approvalRequest: null,
+      phase: 'streaming',
+      turns: [],
     };
     const { lastFrame } = render(<App state={state} />);
     const f = lastFrame() ?? '';
@@ -24,6 +53,8 @@ describe('App', () => {
       reasoning: null,
       content: '',
       approvalRequest: { command: 'rm -rf x', cwd: '/x', reason: 'why' },
+      phase: 'streaming',
+      turns: [],
     };
     const { lastFrame } = render(<App state={state} />);
     expect(lastFrame()).toContain('Approval required');
@@ -39,6 +70,8 @@ describe('App', () => {
       },
       content: '',
       approvalRequest: null,
+      phase: 'streaming',
+      turns: [],
     };
     const { lastFrame, stdin } = render(<App state={state} />);
     // Wait for Ink's useEffect to register the 'readable' listener via setRawMode.
@@ -67,6 +100,8 @@ describe('App', () => {
       reasoning: { text: 'thinking', phase: 'complete', startedAtMs, endedAtMs },
       content: '',
       approvalRequest: null,
+      phase: 'streaming',
+      turns: [],
     };
     const { lastFrame, rerender } = render(<App state={state} />);
     const f1 = lastFrame() ?? '';

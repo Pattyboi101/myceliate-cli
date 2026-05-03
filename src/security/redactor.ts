@@ -1,6 +1,7 @@
 // src/security/redactor.ts
 
-type Pattern = { kind: string; re: RegExp };
+type Kind = 'anthropic_key' | 'openai_key' | 'jwt' | 'pem' | 'env_value';
+type Pattern = { kind: Kind; re: RegExp };
 
 /**
  * Ordered list of secret patterns. Order matters: more specific patterns must

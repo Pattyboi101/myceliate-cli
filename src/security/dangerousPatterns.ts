@@ -27,9 +27,12 @@ const PATTERNS: { re: RegExp; reason: string }[] = [
   // end-of-string after a non-word char does not constitute a JS word boundary.
   // The path-prefix chars are themselves the discriminator; no trailing anchor needed.
   { re: /\brm\s+-rf?\s+(?:\/|~|\$HOME|\*)/, reason: 'recursive delete on root/home/glob' },
+  // Source side covers curl/wget/fetch + nc (netcat exfil/install vector). Destination side
+  // covers every common shell AND every common scripting runtime — `curl ... | python` is the
+  // most-used bash bypass for malicious bootstraps and must trip the HITL gate.
   {
-    re: /\b(?:curl|wget|fetch)\b[^\n]*\|\s*(?:sh|bash|zsh)\b/,
-    reason: 'pipe network response into shell',
+    re: /\b(?:curl|wget|fetch|nc)\b[^\n]*\|\s*(?:sh|bash|zsh|ksh|fish|dash|ash|csh|tcsh|python|python3|perl|ruby|node|deno|pwsh|powershell)\b/,
+    reason: 'pipe network response into shell or scripting runtime',
   },
   { re: /\bsudo\b/, reason: 'sudo escalation' },
   { re: /:\(\)\s*\{[^}]*:\|:[^}]*\}\s*;\s*:/, reason: 'fork bomb' },

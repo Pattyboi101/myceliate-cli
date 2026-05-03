@@ -110,4 +110,14 @@ describe('HitlGate', () => {
     await gate.checkBash({ command: 'echo hello', cwd: process.cwd() });
     expect(requestApproval).not.toHaveBeenCalled();
   });
+
+  it('propagates requestApproval rejection (UI throws — error surfaces to caller)', async () => {
+    // Contract: the gate is a thin wrapper. If the approval UI errors, the rejection
+    // should bubble to the orchestrator rather than being swallowed into a silent verdict.
+    const requestApproval = vi.fn().mockRejectedValue(new Error('UI crashed'));
+    const gate = new HitlGate({ requestApproval });
+    await expect(gate.checkBash({ command: 'rm -rf /', cwd: process.cwd() })).rejects.toThrow(
+      'UI crashed',
+    );
+  });
 });

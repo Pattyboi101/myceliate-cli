@@ -2864,6 +2864,32 @@ git commit -m "feat(memory): CLAUDE.md loader and per-session ConversationLog"
 
 ---
 
+> **Phase 6 review-iteration note:** During Phase 6 execution, code review surfaced fixes applied beyond Tasks 19–20 specs (commit `301d958`):
+>
+> - **Important: ConversationLog init race.** Plan used a boolean `initialized` flag set AFTER `await store.write(...)` in `appendTurn`. Two concurrent `appendTurn` calls on a fresh instance both passed the guard, both called `store.write` (which truncates the file), and the first append's content was silently wiped. Replaced with `initPromise: Promise<void> | null` — the second caller awaits the same write the first kicked off, rather than starting its own. Locked in by a `Promise.all([appendTurn(a), appendTurn(b)])` regression test.
+> - **Important: `storeArtifact` UTF-8 byte semantics.** Plan used `content.length` for both the threshold check and the `ArtifactPointer.bytes` field, but `length` counts UTF-16 code units. A 4096-emoji string has length 8192 but `Buffer.byteLength` 16384; content genuinely 16 KB UTF-8 would slip past a 16 KB cap, and the LLM-facing `bytes` field would carry semantically wrong metadata. Switched both sites to `Buffer.byteLength(content, 'utf8')`. Same pattern as Phase 4's `writeFile.ts` byte-count correction. Locked in by a `'🦆'.repeat(200)` test asserting the threshold offloads at 500 bytes (not 500 code units).
+> - **`readArtifact` JSDoc warning.** Added "Use this method, not `read()`, for artifact paths" — artifact files have no frontmatter block, so `read()` would silently misparse any artifact whose content happens to start with `---\n`.
+>
+> **Additive scope extension during implementation:** the artifact offload primitives (`storeArtifact` / `readArtifact` / `ArtifactPointer`) were Patrick-mandated and NOT in the original plan code. Implemented in the Task 19 commit with deterministic SHA-256 hex-prefix ids (16 chars / 64 bits of entropy) so duplicate large outputs share a single path. Phase 9 orchestrator will plug these into the tool-result injection path; Phase 6's ConversationLog stays untouched.
+>
+> **Pre-flagged inline fixes during implementation** (commits `ddf8cb8`, `d58b94b`):
+>
+> - `type Record` rename to `MdRecord`. Plan's `export type Record = {...}` immediately after `Frontmatter = Record<string, unknown>` had the local declaration shadow the built-in utility type, breaking the first line. Renamed at source from the start.
+> - `m.content ?? ''` in `renderTurn`. `AssistantMessage.content` is `string | null`; plan's template literal would have emitted the literal string `"null"` on tool-only turns.
+>
+> Tests: 119 → 142 unit (+23 across this phase). Reviewer verdicts: atomic-write semantics safe with the init-race fix; artifact-pointer hygiene clean with the byte-count fix; frontmatter parser robust (horizontal rules in body, multi-line string values, malformed input all traced safe). Treat the code under `src/memory/` and tests under `tests/unit/memory/` as the source of truth.
+>
+> **Phase 6 review follow-ups deferred to v2:**
+>
+> - `markdownStore.ts` atomic large-write semantics: `storeArtifact` uses `writeFile` which issues multiple syscalls for MB-sized content; a crash mid-write leaves a partial artifact. v2 fix: write-to-temp + `rename()` (atomic on POSIX).
+> - `markdownStore.ts` hash collision: 16-hex-char SHA-256 prefix gives 2^-64 collision probability per pair. Acceptable for v1; v2: extend to 32 chars or use the full digest.
+> - `markdownStore.ts` `readArtifact` path confinement: `pointer.path` is not verified to stay under root. Defense-in-depth `path.resolve` + prefix check. Blocked on the Phase 7 security gateway per R11.
+> - `markdownStore.ts` typed errors: `readArtifact` throws raw `ENOENT`; a `MarkdownStoreError` class would give cleaner caller error handling.
+> - `markdownStore.ts` `preview` surrogate-pair slicing: `content.slice(0, 200)` may split an astral character mid-codepoint. Cosmetic — preview is human-facing only.
+> - `parseRecord` malformed-frontmatter logging: lines without colons are silently `continue`d. A `console.warn` would make typo'd keys visible during development.
+
+---
+
 ## Phase 7 — Security (Egress redaction + HITL gate)
 
 ### Task 21: Secret redactor

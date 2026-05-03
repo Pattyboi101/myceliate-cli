@@ -251,3 +251,30 @@ it('yields tool_result with status=failed and a cause when invoke throws', async
   expect(result?.id).toBe('t2');
   expect(result?.cause).toBeInstanceOf(Error);
 });
+
+it('yields tool_result with status=rejected when invoke throws an HITL-rejected error', async () => {
+  const tools = makeMockTools({
+    bash: async () => {
+      throw new Error('HITL rejected: user said no');
+    },
+  });
+  const client = makeMockClient([
+    [
+      { type: 'tool_call', id: 'h1', name: 'bash', args: { command: 'rm -rf /' } },
+      { type: 'done', usage: zeroUsage() },
+    ],
+    [
+      { type: 'content_delta', text: 'recovered' },
+      { type: 'done', usage: zeroUsage() },
+    ],
+  ]);
+  const events: StreamEvent[] = [];
+  const engine = new QueryEngine({ systemPrompt: 's', workingBudget: 1_000_000 });
+  engine.appendUser('go');
+  for await (const ev of runReactLoop({ client, engine, tools, model: 'm', cwd: '/tmp' }))
+    events.push(ev);
+  const result = events.find(
+    (e): e is Extract<StreamEvent, { type: 'tool_result' }> => e.type === 'tool_result',
+  );
+  expect(result?.status).toBe('rejected');
+});

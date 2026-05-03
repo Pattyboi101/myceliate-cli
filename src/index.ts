@@ -78,6 +78,11 @@ async function main(): Promise<void> {
   let reasoningText = '';
   let contentText = '';
   let firstPromptConsumed = false;
+  // Phase 12 review M1 fix: track how many engine messages have already been
+  // flushed to disk so onTurnComplete can append only the delta. The initial
+  // user prompt is written eagerly in readNextPrompt below (Phase 11 FIX #3
+  // crash-safety), so this starts at 1.
+  let lastSnapshotLen = 1;
 
   try {
     await runReplSession({
@@ -118,10 +123,13 @@ async function main(): Promise<void> {
         }
       },
       onTurnComplete: async (snapshot) => {
-        // Flush new messages to the conversation log. Skip messages already written:
-        // first turn's user message is written below before the loop reads its first prompt.
-        const fromIndex = state.turns.length === 0 && firstPromptConsumed ? 1 : 0;
-        for (const m of snapshot.slice(fromIndex)) await conversation.appendTurn(m);
+        // Phase 12 review M1 fix: append only the delta since the last flush.
+        // Previous heuristic (state.turns.length === 0 && firstPromptConsumed
+        // ? 1 : 0) re-wrote turn 1 on every subsequent turn, duplicating
+        // history entries. Tracking lastSnapshotLen instead is unconditional
+        // and correct across any turn count.
+        for (const m of snapshot.slice(lastSnapshotLen)) await conversation.appendTurn(m);
+        lastSnapshotLen = snapshot.length;
         const newTurn: CompletedTurn = { userInput: state.userInput, content: contentText };
         const turns = [...state.turns, newTurn];
         // Reset live region; show prompt input for next turn.

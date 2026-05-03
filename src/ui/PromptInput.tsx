@@ -9,6 +9,10 @@ import type React from 'react';
  *
  * U3-compliant: no Clack mid-Ink-render. The agent loop owns input via Ink
  * for the entire session (Clack only runs pre-Ink during onboarding).
+ *
+ * Phase 12 review m1 fix: Ctrl+D submits `/quit`, matching shell EOF idiom.
+ * Empty Enter no longer exits silently — `''` was removed from QUIT_TOKENS in
+ * replSession.ts and an explicit hint is rendered below the buffer.
  */
 export function PromptInput({ onSubmit }: { onSubmit: (text: string) => void }): React.JSX.Element {
   const [buffer, setBuffer] = useState('');
@@ -19,6 +23,11 @@ export function PromptInput({ onSubmit }: { onSubmit: (text: string) => void }):
       const submitted = buffer;
       setBuffer('');
       onSubmit(submitted);
+      return;
+    }
+    // Ctrl+D → /quit (shell EOF idiom).
+    if (key.ctrl && input === 'd') {
+      onSubmit('/quit');
       return;
     }
     if (key.backspace || key.delete) {
@@ -32,10 +41,15 @@ export function PromptInput({ onSubmit }: { onSubmit: (text: string) => void }):
   });
 
   return (
-    <Box marginTop={1}>
-      <Text color="green">{'> '}</Text>
-      <Text>{buffer}</Text>
-      <Text color="gray">{'▎'}</Text>
+    <Box flexDirection="column" marginTop={1}>
+      <Box>
+        <Text color="green">{'> '}</Text>
+        <Text>{buffer}</Text>
+        <Text color="gray">{'▎'}</Text>
+      </Box>
+      <Text color="gray" dimColor>
+        {'  /quit or Ctrl+D to exit'}
+      </Text>
     </Box>
   );
 }

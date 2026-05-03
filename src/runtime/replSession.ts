@@ -21,7 +21,10 @@ export type ReplSessionOptions = {
   readNextPrompt: () => Promise<string>;
 };
 
-const QUIT_TOKENS = new Set(['/quit', '/exit', '']);
+// Phase 12 review m2 fix: `''` removed from QUIT_TOKENS so an accidental empty
+// Enter re-prompts instead of silently exiting. Ctrl+D in PromptInput sends
+// `/quit` explicitly for shell-EOF parity.
+const QUIT_TOKENS = new Set(['/quit', '/exit']);
 
 export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
   const engine = new QueryEngine({
@@ -32,6 +35,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
   while (true) {
     const prompt = (await opts.readNextPrompt()).trim();
     if (QUIT_TOKENS.has(prompt)) return;
+    if (prompt.length === 0) continue; // Empty submit just re-prompts.
 
     engine.appendUser(prompt);
     for await (const ev of runReactLoop({

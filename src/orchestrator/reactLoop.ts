@@ -3,6 +3,7 @@ import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { ToolCall } from '../adapters/messages.js';
 import type { StreamEvent } from '../adapters/streamEvent.js';
 import type { MarkdownStore } from '../memory/markdownStore.js';
+import { redactSecrets } from '../security/redactor.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { QueryEngine } from './QueryEngine.js';
 
@@ -83,11 +84,13 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
     yield { type: 'turn_complete' };
 
     for (const call of pendingCalls) {
+      const startedAt = Date.now();
       try {
         const rawContent = await opts.tools.invoke(call.name, call.args, {
           cwd: opts.cwd ?? process.cwd(),
           ...(opts.signal ? { abort: opts.signal } : {}),
         });
+        const durationMs = Date.now() - startedAt;
 
         // Directive #4: offload oversized results to artifact store.
         let content: string;
@@ -113,13 +116,33 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
           is_error: false,
           content,
         });
+
+        // Redact the preview before it reaches the UI: the preview field is
+        // user-visible in the TUI, so it deserves the same R11 treatment as
+        // egress payloads. F1 only redacts at `serializeMessage`; this is a
+        // separate UI-channel application of the same primitive.
+        yield {
+          type: 'tool_result',
+          id: call.id,
+          status: 'completed',
+          durationMs,
+          ...(rawContent.length > 0 ? { preview: redactSecrets(rawContent.slice(0, 200)) } : {}),
+        } satisfies StreamEvent;
       } catch (err) {
+        const durationMs = Date.now() - startedAt;
         opts.engine.appendToolResult({
           tool_use_id: call.id,
           command: `${call.name} ${JSON.stringify(call.args)}`,
           is_error: true,
           content: err instanceof Error ? err.message : String(err),
         });
+        yield {
+          type: 'tool_result',
+          id: call.id,
+          status: 'failed',
+          durationMs,
+          ...(err !== undefined ? { cause: err } : {}),
+        } satisfies StreamEvent;
       }
     }
   }

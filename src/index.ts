@@ -1,4 +1,7 @@
 // src/index.ts
+import { loadDotenv } from './runtime/dotenv.js';
+loadDotenv();
+
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { render } from 'ink';

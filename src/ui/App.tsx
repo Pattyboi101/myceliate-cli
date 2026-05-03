@@ -55,9 +55,18 @@ export function App({
 }): React.JSX.Element {
   // U1 mandates the reasoning trace is "Toggleable via keyboard." Tab flips
   // expansion; ReasoningBlock's collapsed view advertises this affordance.
+  // Tab dispatch is precedence-based: reasoning toggle first; otherwise toggle
+  // the most-recent tool card's expansion when reasoning is null.
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
+  const [cardExpanded, setCardExpanded] = useState(false);
   useInput((_input, key) => {
-    if (key.tab) setReasoningExpanded((prev) => !prev);
+    if (key.tab) {
+      if (state.reasoning) {
+        setReasoningExpanded((p) => !p);
+      } else if (state.toolCalls.length > 0) {
+        setCardExpanded((p) => !p);
+      }
+    }
   });
 
   return (
@@ -87,8 +96,12 @@ export function App({
               expanded={reasoningExpanded}
             />
           )}
-          {state.toolCalls.map((card) => (
-            <ToolCallCard key={card.id} card={card} />
+          {state.toolCalls.map((card, i) => (
+            <ToolCallCard
+              key={card.id}
+              card={card}
+              expanded={cardExpanded && i === state.toolCalls.length - 1}
+            />
           ))}
           {state.content.length > 0 && <ContentStream text={state.content} />}
         </>

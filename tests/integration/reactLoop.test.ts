@@ -243,4 +243,80 @@ describe('runReactLoop (mock client)', () => {
       events.push(ev);
     expect(observedCwd).toBe(tmp);
   });
+
+  it('ZodError from mistyped tool args becomes is_error: true (loop continues)', async () => {
+    // Tool schema rejects bad input → registry.invoke throws ZodError → reactLoop's
+    // try/catch wraps into an is_error result. Loop must NOT propagate the throw;
+    // the agent recovers and the next turn happens normally.
+    const client = new ScriptedClient([
+      [
+        { type: 'tool_call', id: 't1', name: 'echo', args: { msg: 123 } }, // wrong type — string expected
+        { type: 'done', usage: { promptTokens: 5, completionTokens: 1, reasoningTokens: 0 } },
+      ],
+      [
+        { type: 'content_delta', text: 'Recovered.' },
+        { type: 'done', usage: { promptTokens: 5, completionTokens: 1, reasoningTokens: 0 } },
+      ],
+    ]);
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    const tools = new ToolRegistry();
+    tools.register({
+      name: 'echo',
+      description: 'd',
+      capability: 'execution',
+      inputSchema: z.object({ msg: z.string() }),
+      run: async ({ msg }) => msg,
+    });
+    engine.appendUser('say hi');
+    const events: StreamEvent[] = [];
+    for await (const ev of runReactLoop({ client, engine, tools, model: 'm' })) events.push(ev);
+    const tool = engine.snapshot().find((m) => m.role === 'tool');
+    expect(tool).toBeDefined();
+    if (tool?.role === 'tool') {
+      expect(tool.result.is_error).toBe(true);
+      expect(tool.result.content.length).toBeGreaterThan(0);
+    }
+    // Loop continued — second turn's content_delta arrived
+    expect(events.some((e) => e.type === 'content_delta' && e.text === 'Recovered.')).toBe(true);
+  });
+
+  it('non-async tool run() that throws synchronously is caught and recovered', async () => {
+    // The registry's `invoke` is `async` — that's the load-bearing safety net that
+    // converts a synchronous throw inside any non-async run() into a rejected
+    // Promise, which the reactLoop's try/catch then handles uniformly. Without it,
+    // a single sync throw would crash the generator and the whole agent.
+    const client = new ScriptedClient([
+      [
+        { type: 'tool_call', id: 't1', name: 'boom', args: {} },
+        { type: 'done', usage: { promptTokens: 5, completionTokens: 1, reasoningTokens: 0 } },
+      ],
+      [
+        { type: 'content_delta', text: 'Recovered.' },
+        { type: 'done', usage: { promptTokens: 5, completionTokens: 1, reasoningTokens: 0 } },
+      ],
+    ]);
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    const tools = new ToolRegistry();
+    tools.register({
+      name: 'boom',
+      description: 'd',
+      capability: 'execution',
+      inputSchema: z.object({}),
+      // Non-async run that throws synchronously. Return type is `never`,
+      // assignable to `Promise<string>` because `never` is the bottom type.
+      run: () => {
+        throw new Error('sync boom');
+      },
+    });
+    engine.appendUser('test');
+    const events: StreamEvent[] = [];
+    for await (const ev of runReactLoop({ client, engine, tools, model: 'm' })) events.push(ev);
+    const tool = engine.snapshot().find((m) => m.role === 'tool');
+    expect(tool).toBeDefined();
+    if (tool?.role === 'tool') {
+      expect(tool.result.is_error).toBe(true);
+      expect(tool.result.content).toContain('sync boom');
+    }
+    expect(events.some((e) => e.type === 'content_delta' && e.text === 'Recovered.')).toBe(true);
+  });
 });

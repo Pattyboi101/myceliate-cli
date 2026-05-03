@@ -67,10 +67,10 @@ export class QueryEngine {
   private applyR2(history: readonly Message[]): Message[] {
     return history.map((m) => {
       if (m.role === 'assistant' && !hasToolCalls(m) && m.reasoning_content) {
-        // Build the output object without reasoning_content (no any, no mutation).
-        const copy: AssistantMessage = { role: 'assistant', content: m.content };
-        if (m.tool_calls) copy.tool_calls = m.tool_calls;
-        return copy;
+        // Branch is entered only when !hasToolCalls(m), so we deliberately do NOT
+        // copy tool_calls — propagating an empty/missing array would produce an
+        // invalid wire shape for both V3 and V4 adapters.
+        return { role: 'assistant', content: m.content };
       }
       return m;
     });

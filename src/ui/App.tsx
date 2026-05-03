@@ -1,5 +1,6 @@
 // src/ui/App.tsx
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
+import { useState } from 'react';
 import type React from 'react';
 import type { ApprovalRequest, ApprovalResponse } from '../security/hitlGate.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
@@ -19,6 +20,13 @@ export function App({
   state,
   onApprovalResponse,
 }: { state: AppState; onApprovalResponse?: (r: ApprovalResponse) => void }): React.JSX.Element {
+  // U1 mandates the reasoning trace is "Toggleable via keyboard." Tab flips
+  // expansion; ReasoningBlock's collapsed view advertises this affordance.
+  const [reasoningExpanded, setReasoningExpanded] = useState(false);
+  useInput((_input, key) => {
+    if (key.tab) setReasoningExpanded((prev) => !prev);
+  });
+
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box marginBottom={1}>
@@ -30,6 +38,7 @@ export function App({
           text={state.reasoning.text}
           phase={state.reasoning.phase}
           durationMs={Date.now() - state.reasoning.startedAtMs}
+          expanded={reasoningExpanded}
         />
       )}
       {state.content.length > 0 && <ContentStream text={state.content} />}

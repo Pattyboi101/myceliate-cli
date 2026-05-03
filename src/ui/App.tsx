@@ -8,6 +8,7 @@ import { Banner, type BannerInfo } from './Banner.js';
 import { ContentStream } from './ContentStream.js';
 import { PromptInput } from './PromptInput.js';
 import { ReasoningBlock } from './ReasoningBlock.js';
+import { ToolCallCard, type ToolCallCardState } from './ToolCallCard.js';
 
 export type ReasoningState = {
   text: string;
@@ -36,6 +37,8 @@ export type AppState = {
   phase: 'streaming' | 'awaiting_input';
   /** Append-only log of completed turns (rendered above the live region). */
   turns: CompletedTurn[];
+  /** Tool-call cards for the current turn (cleared on turn_complete). */
+  toolCalls: ToolCallCardState[];
 };
 
 export function App({
@@ -84,6 +87,9 @@ export function App({
               expanded={reasoningExpanded}
             />
           )}
+          {state.toolCalls.map((card) => (
+            <ToolCallCard key={card.id} card={card} />
+          ))}
           {state.content.length > 0 && <ContentStream text={state.content} />}
         </>
       )}

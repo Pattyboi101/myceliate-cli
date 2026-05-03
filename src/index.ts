@@ -61,6 +61,7 @@ async function main(): Promise<void> {
     approvalRequest: null,
     phase: 'awaiting_input',
     turns: [],
+    toolCalls: [],
   };
   const banner = {
     model: onboarding.model,
@@ -117,7 +118,47 @@ async function main(): Promise<void> {
           rerender({ ...state, content: contentText });
         } else if (ev.type === 'tool_call') {
           logger.info({ event: 'tool_call', name: ev.name, id: ev.id });
+          rerender({
+            ...state,
+            toolCalls: [
+              ...state.toolCalls,
+              { id: ev.id, name: ev.name, args: ev.args, status: 'running' },
+            ],
+          });
+        } else if (ev.type === 'tool_result') {
+          logger.info({
+            event: 'tool_result',
+            id: ev.id,
+            status: ev.status,
+            durationMs: ev.durationMs,
+          });
+          rerender({
+            ...state,
+            toolCalls: state.toolCalls.map((c) =>
+              c.id === ev.id
+                ? {
+                    ...c,
+                    status: ev.status,
+                    durationMs: ev.durationMs,
+                    ...(ev.preview ? { preview: ev.preview } : {}),
+                    ...(ev.cause
+                      ? { error: ev.cause instanceof Error ? ev.cause.message : String(ev.cause) }
+                      : {}),
+                  }
+                : c,
+            ),
+          });
         } else if (ev.type === 'turn_complete') {
+          // F4 reset: clear per-turn reasoning + content buffers so turn N's
+          // content does not concatenate onto turn N-1's. Phase 13 review M1:
+          // do NOT clear `toolCalls` here. `runReactLoop` yields `turn_complete`
+          // BEFORE the `for (const call of pendingCalls)` loop (reactLoop.ts:82),
+          // which means `tool_result` events arrive AFTER `turn_complete`. If we
+          // wiped `toolCalls` on `turn_complete`, the subsequent `tool_result`
+          // map would silently no-op against an empty array and cards would
+          // never transition from `running` to `completed`/`failed`. Cards are
+          // cleared at the REPL boundary instead — `onTurnComplete` and the
+          // `readNextPrompt` resolver below.
           reasoningText = '';
           contentText = '';
           reasonStartedAt = Date.now();
@@ -149,6 +190,7 @@ async function main(): Promise<void> {
           approvalRequest: null,
           phase: 'awaiting_input',
           turns,
+          toolCalls: [],
         });
       },
       readNextPrompt: async () =>
@@ -162,6 +204,7 @@ async function main(): Promise<void> {
             approvalRequest: null,
             phase: 'streaming',
             turns: state.turns,
+            toolCalls: [],
           });
           return text;
         }),

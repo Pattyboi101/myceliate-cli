@@ -6,6 +6,7 @@ import {
   isError,
   isReasoningDelta,
   isToolCall,
+  isToolResult,
 } from '../../../src/adapters/streamEvent.js';
 
 describe('StreamEvent', () => {
@@ -23,4 +24,21 @@ describe('StreamEvent', () => {
     expect(events.filter(isDone)).toHaveLength(1);
     expect(events.filter(isError)).toHaveLength(1);
   });
+});
+
+it('isToolResult narrows correctly on completed/failed/rejected', () => {
+  const ev = {
+    type: 'tool_result' as const,
+    id: 't1',
+    status: 'completed' as const,
+    durationMs: 42,
+    preview: 'ok',
+  };
+  expect(isToolResult(ev)).toBe(true);
+  expect(
+    isToolResult({
+      type: 'done' as const,
+      usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 },
+    }),
+  ).toBe(false);
 });

@@ -3,6 +3,14 @@ import { spawn } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadProjectClaudeMd } from '../memory/claudeMd.js';
+import { isSecretFile } from '../security/secretFileFilter.js';
+
+// Phase 16 review (MAJOR-1): the secret-file filter previously lived inline here
+// and protected only the system-prompt's `cwd entries:` injection. The same
+// filter must apply to `src/tools/listDir.ts` (the agent-facing list_dir tool)
+// so an execution sub-agent cannot bypass the system-prompt filter and read
+// secret-adjacent filenames via tool dispatch. The filter logic now lives in
+// `src/security/secretFileFilter.ts` and is shared by both callers.
 
 export type SessionContext = {
   cwd: string;
@@ -52,7 +60,7 @@ function spawnCollect(cmd: string, args: string[], cwd: string): Promise<string>
 async function listDirEntries(cwd: string): Promise<string[]> {
   try {
     const entries = await readdir(cwd);
-    return [...entries].sort();
+    return entries.filter((name) => !isSecretFile(name)).sort();
   } catch {
     return [];
   }

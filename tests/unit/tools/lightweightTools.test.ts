@@ -82,6 +82,42 @@ describe('lightweight tools', () => {
     expect(out).toBe('');
   });
 
+  // Phase 16 review (MAJOR-1): listDir tool must apply the secret-file filter
+  // so an execution sub-agent cannot bypass the senseContext system-prompt filter
+  // by calling list_dir directly. The filter is shared with senseContext via
+  // `src/security/secretFileFilter.ts`.
+  it('listDir filters secret-adjacent filenames from the tool result', async () => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const sandbox = join(tmp, 'secret-sandbox');
+    await mkdir(sandbox);
+    await writeFile(join(sandbox, '.env'), 'DEEPSEEK_API_KEY=secret');
+    await writeFile(join(sandbox, '.env.staging'), 'STAGING=1');
+    await writeFile(join(sandbox, 'README.md'), 'public');
+    await writeFile(join(sandbox, 'id_rsa'), 'private');
+    await writeFile(join(sandbox, 'tls.key'), 'private');
+    await writeFile(join(sandbox, 'cert.pem'), 'pem block');
+    await writeFile(join(sandbox, 'creds.gpg'), 'gpg blob');
+    await writeFile(join(sandbox, '.npmrc'), 'token');
+    await mkdir(join(sandbox, '.git'));
+    await mkdir(join(sandbox, 'src'));
+
+    const r = new ToolRegistry();
+    r.register(listDirTool);
+    const out = await r.invoke('list_dir', { path: sandbox });
+    const entries = out.split('\n').filter(Boolean);
+
+    expect(entries).not.toContain('.env');
+    expect(entries).not.toContain('.env.staging');
+    expect(entries).not.toContain('.git');
+    expect(entries).not.toContain('id_rsa');
+    expect(entries).not.toContain('tls.key');
+    expect(entries).not.toContain('cert.pem');
+    expect(entries).not.toContain('creds.gpg');
+    expect(entries).not.toContain('.npmrc');
+    expect(entries).toContain('README.md');
+    expect(entries).toContain('src');
+  });
+
   it('grep with zero matches returns empty string', async () => {
     const r = new ToolRegistry();
     r.register(grepTool);

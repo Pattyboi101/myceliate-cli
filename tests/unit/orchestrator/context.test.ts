@@ -72,6 +72,36 @@ describe('senseContext', () => {
   });
 });
 
+it('filters secret-adjacent filenames from listDirEntries (.env, .git, .myceliate, id_rsa, *.key, *.pem)', async () => {
+  const tmp = await mkdtemp(join(tmpdir(), 'myc-ctx-filter-'));
+  try {
+    await writeFile(join(tmp, '.env'), 'DEEPSEEK_API_KEY=secret');
+    await writeFile(join(tmp, '.env.local'), 'OTHER=val');
+    await writeFile(join(tmp, 'README.md'), 'public');
+    await writeFile(join(tmp, 'id_rsa'), 'private key');
+    await writeFile(join(tmp, 'tls.key'), 'private');
+    await writeFile(join(tmp, 'cert.pem'), 'pem block');
+    await writeFile(join(tmp, 'secrets.json'), '{}');
+    await mkdir(join(tmp, '.git'));
+    await mkdir(join(tmp, '.myceliate'));
+    await mkdir(join(tmp, 'src'));
+
+    const ctx = await senseContext({ cwd: tmp });
+    expect(ctx.dirEntries).not.toContain('.env');
+    expect(ctx.dirEntries).not.toContain('.env.local');
+    expect(ctx.dirEntries).not.toContain('.git');
+    expect(ctx.dirEntries).not.toContain('.myceliate');
+    expect(ctx.dirEntries).not.toContain('id_rsa');
+    expect(ctx.dirEntries).not.toContain('tls.key');
+    expect(ctx.dirEntries).not.toContain('cert.pem');
+    expect(ctx.dirEntries).not.toContain('secrets.json');
+    expect(ctx.dirEntries).toContain('README.md');
+    expect(ctx.dirEntries).toContain('src');
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 describe('buildSystemPrompt', () => {
   // F5: gitStatus and dirEntries are now wired into the system prompt as
   // session ground truth. Previously senseContext populated them on every

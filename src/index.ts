@@ -206,6 +206,17 @@ async function main(): Promise<void> {
           // never transition from `running` to `completed`/`failed`. Cards are
           // cleared at the REPL boundary instead — `onTurnComplete` and the
           // `readNextPrompt` resolver below.
+          //
+          // Phase 17 review m4: `approvalRequests` shares the same invariant
+          // and is intentionally NOT cleared on `turn_complete`. A HITL gate
+          // can fire mid-turn (the bash tool calls `checkBash` from inside
+          // tool execution); when `turn_complete` yields, an approval prompt
+          // may still be visible and unresolved. Clearing `approvalRequests`
+          // here would orphan the resolver in `approvalResolvers` (Map keyed
+          // by requestId — the entry survives, but no UI exposes it). The
+          // queue is correctly drained at REPL boundaries: `onTurnComplete`
+          // (after all tool_results have arrived) and `readNextPrompt` (when
+          // the user submits the next prompt).
           reasoningText = '';
           contentText = '';
           reasonStartedAt = Date.now();
@@ -257,6 +268,16 @@ async function main(): Promise<void> {
         }),
     });
   } finally {
+    // Phase 17 review m5 — known leak: if `pendingApprovals` has unresolved
+    // entries when we reach this finally (e.g., user `/quit`s with an HITL
+    // prompt visible), the corresponding resolvers in `approvalResolvers`
+    // never fire. The bash subprocess waiting on the orphaned promise is
+    // unblocked by the parent process exit anyway (worker.shutdown below
+    // SIGTERMs the worker, killing the subprocess), so this is not a
+    // data-integrity issue — but a v1.3 cleanup could iterate the Map and
+    // reject each pending resolver with an explicit `aborted-on-shutdown`
+    // error so the bash tool path surfaces cleanly instead of relying on
+    // process exit to free the held promise.
     await logger.flush();
     ink.unmount();
     await queueEvents.close();

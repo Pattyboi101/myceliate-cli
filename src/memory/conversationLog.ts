@@ -53,6 +53,15 @@ export class ConversationLog {
     // secrets. Does NOT serialize approvalRequests or approvalResolvers — those
     // live in AppState / src/index.ts and are NOT part of the canonical Message
     // struct (Phase 17 carry-forward #1).
+    //
+    // Phase 18 review m4: the .md and .jsonl appends are SEQUENTIAL `await`s,
+    // not atomic. If the .md write succeeds but the .jsonl write fails (disk
+    // full, fs error mid-write), the two files drift out of sync — the .md
+    // has the turn but readSession won't see it on resume. Acceptable in v1.2
+    // (single-user, append-only logs); v1.3 may add a crash-recovery path
+    // that detects truncation and falls back to re-synthesising .jsonl from
+    // the .md (non-trivial because renderTurn's Markdown is not round-trippable
+    // back to Message[] — that's the original motivation for the .jsonl).
     const redacted = redactMessage(message);
     await this.store.append(this.jsonlPath(), `${JSON.stringify(redacted)}\n`);
   }
@@ -90,6 +99,25 @@ export class ConversationLog {
  * the .md. Pure helper — does not mutate the input. Does NOT touch
  * approvalRequests or approvalResolvers (those are AppState / closure state,
  * not part of the canonical Message struct — Phase 17 carry-forward #1).
+ *
+ * Phase 18 review n3: keep redaction policy in sync with `renderTurn` below.
+ * If you add a new pattern to `redactSecrets` or change which fields get
+ * redacted, update BOTH this function and renderTurn — they target the same
+ * threat model (egress vs disk parity) via different output formats.
+ *
+ * Phase 18 review m1 (fidelity fix): the assistant `content` field is
+ * `string | null` per `AssistantMessage`. Naive truthy-check `m.content ? ... : null`
+ * collapses `''` (the runtime state of a tool-call-only turn — `reactLoop.ts`
+ * starts `assistantContent = ''` and never receives a `content_delta`) into
+ * `null`, breaking round-trip fidelity. Use explicit `!== null` so empty
+ * string survives as empty string and only the genuine `null` becomes `null`.
+ *
+ * Phase 18 review MINOR-1 (R11 parity fix): `result.command` is constructed
+ * in `reactLoop.ts` as `${call.name} ${JSON.stringify(call.args)}` — raw
+ * LLM-provided args. The .md path (`renderTurn`) never includes `command`,
+ * so this field is invisible there. The JSONL is the FIRST persistent channel
+ * that carries it. Apply `redactSecrets` to maintain parity with the .md's
+ * effective behaviour (no unredacted egress channel for command).
  */
 function redactMessage(m: Message): Message {
   switch (m.role) {
@@ -99,7 +127,7 @@ function redactMessage(m: Message): Message {
     case 'assistant': {
       const out: AssistantMessage = {
         role: 'assistant',
-        content: m.content ? redactSecrets(m.content) : null,
+        content: m.content !== null ? redactSecrets(m.content) : null,
       };
       if (m.reasoning_content) out.reasoning_content = redactSecrets(m.reasoning_content);
       if (m.tool_calls?.length) {
@@ -116,7 +144,7 @@ function redactMessage(m: Message): Message {
         role: 'tool',
         result: {
           tool_use_id: m.result.tool_use_id,
-          command: m.result.command,
+          command: redactSecrets(m.result.command),
           is_error: m.result.is_error,
           content: redactSecrets(m.result.content),
         },

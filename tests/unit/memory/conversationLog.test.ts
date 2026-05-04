@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Message } from '../../../src/adapters/messages.js';
 import { ConversationLog } from '../../../src/memory/conversationLog.js';
 import { MarkdownStore } from '../../../src/memory/markdownStore.js';
 
@@ -187,5 +188,81 @@ describe('ConversationLog JSONL sidecar + readSession (Phase 18)', () => {
     expect(messages[0]?.role).toBe('user');
     expect((messages[0] as { content: string }).content).toBe('a');
     expect((messages[1] as { content: string }).content).toBe('b');
+  });
+
+  // Phase 18 review m1: assistant content fidelity. Locks the
+  // `m.content !== null` redactMessage guard against a regression to
+  // truthy-check (which would collapse content: '' into content: null).
+  it('round-trips assistant content distinctions: empty string stays empty, null stays null', async () => {
+    const log = new ConversationLog(store, 'sess-fidelity');
+    // Empty-string content (the runtime state of a tool-call-only assistant
+    // turn — assistantContent starts at '' and never receives a content_delta).
+    await log.appendTurn({
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ id: 't1', name: 'bash', args: { cmd: 'ls' } }],
+    });
+    // Genuine null content.
+    await log.appendTurn({
+      role: 'assistant',
+      content: null,
+      tool_calls: [{ id: 't2', name: 'bash', args: { cmd: 'pwd' } }],
+    });
+
+    const messages = await ConversationLog.readSession(store, 'sess-fidelity');
+    expect(messages).toHaveLength(2);
+    // Empty string survives as empty string (NOT collapsed to null).
+    expect(messages[0]?.role).toBe('assistant');
+    expect((messages[0] as { content: string | null }).content).toBe('');
+    // Null survives as null.
+    expect(messages[1]?.role).toBe('assistant');
+    expect((messages[1] as { content: string | null }).content).toBeNull();
+  });
+
+  // Phase 18 review MINOR-1 (R11 parity): the result.command field is
+  // constructed in reactLoop.ts as `${call.name} ${JSON.stringify(call.args)}`
+  // — raw LLM-provided args. The .md path (renderTurn) drops it entirely;
+  // the JSONL is the FIRST persistent channel that carries it, so it must
+  // be redacted on the way to disk to match egress + .md effective parity.
+  it('redacts secrets in tool result.command (matches egress / .md parity)', async () => {
+    const log = new ConversationLog(store, 'sess-cmd');
+    await log.appendTurn({
+      role: 'tool',
+      result: {
+        tool_use_id: 't1',
+        // Simulate a command string that carries an env-style secret.
+        command:
+          'bash {"command":"export OPENAI_API_KEY=sk-realLooking1234567890abcdef && echo done"}',
+        is_error: false,
+        content: 'done',
+      },
+    });
+    const messages = await ConversationLog.readSession(store, 'sess-cmd');
+    expect(messages).toHaveLength(1);
+    const tool = messages[0] as Extract<Message, { role: 'tool' }>;
+    expect(tool.role).toBe('tool');
+    expect(tool.result.command).not.toContain('sk-realLooking1234567890abcdef');
+    expect(tool.result.command).toContain('[REDACTED:');
+  });
+
+  // Round-trip a tool message with is_error: true (previously only is_error: false
+  // was exercised in the round-trip path).
+  it('round-trips tool result with is_error: true preserving the error flag', async () => {
+    const log = new ConversationLog(store, 'sess-err');
+    await log.appendTurn({
+      role: 'tool',
+      result: {
+        tool_use_id: 't1',
+        command: 'bash',
+        is_error: true,
+        content: 'spawn ENOENT',
+      },
+    });
+    const messages = await ConversationLog.readSession(store, 'sess-err');
+    expect(messages).toHaveLength(1);
+    const tool = messages[0] as Extract<Message, { role: 'tool' }>;
+    expect(tool.role).toBe('tool');
+    expect(tool.result.is_error).toBe(true);
+    expect(tool.result.content).toBe('spawn ENOENT');
   });
 });

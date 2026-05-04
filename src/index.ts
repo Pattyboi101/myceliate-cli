@@ -18,7 +18,7 @@ import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
 import { runReplSession } from './runtime/replSession.js';
-import { buildTurnsFromHistory, isSafeToResume } from './runtime/resume.js';
+import { buildTurnsFromHistory, isSafeToResume, parseResumeFlag } from './runtime/resume.js';
 import { startWorker } from './runtime/workerLifecycle.js';
 import { type ApprovalRequest, type ApprovalResponse, HitlGate } from './security/hitlGate.js';
 import { createBashTool } from './tools/bash.js';
@@ -30,21 +30,6 @@ import { writeFileTool } from './tools/writeFile.js';
 import { App, type AppState, type CompletedTurn } from './ui/App.js';
 import { runOnboarding } from './ui/onboarding.js';
 import { createLogger } from './util/logger.js';
-
-/**
- * Parse --resume <id> from argv. Returns the session-id string if present,
- * or undefined if the flag is absent. Throws if --resume appears without an
- * argument or with another flag as its value.
- */
-function parseResumeFlag(argv: readonly string[]): string | undefined {
-  const idx = argv.indexOf('--resume');
-  if (idx === -1) return undefined;
-  const id = argv[idx + 1];
-  if (!id || id.startsWith('--')) {
-    throw new Error('--resume requires a session-id argument (e.g., --resume abc-123)');
-  }
-  return id;
-}
 
 async function main(): Promise<void> {
   const onboarding = await runOnboarding({
@@ -72,6 +57,19 @@ async function main(): Promise<void> {
   let initialTurns: CompletedTurn[] = [];
   if (resumeId !== undefined) {
     const rehydrated = await ConversationLog.readSession(memory, resumeId);
+    // Phase 18 review m5: refuse on missing-session ID instead of silently
+    // starting a fresh log under the supplied (wrong) ID. `readSession`
+    // returns [] for both "file not found" and "file exists but empty"; in
+    // either case, an explicit --resume that finds nothing to resume is
+    // user error and should fail loudly. v1.3 may add `myceliate sessions`
+    // to list available IDs and a more granular distinction between
+    // "missing" and "empty" via a tri-state return from readSession.
+    if (rehydrated.length === 0) {
+      console.error(
+        `Cannot resume session ${resumeId}: no history found at .myceliate/history/${resumeId}.jsonl.\nUse \`ls .myceliate/history/\` to list available session IDs.`,
+      );
+      process.exit(1);
+    }
     if (!isSafeToResume(rehydrated)) {
       console.error(
         `Cannot resume session ${resumeId}: last assistant turn has unanswered tool_calls.\nThe session was interrupted mid-flow. v1.2 refuses; v1.3 may add recovery.`,

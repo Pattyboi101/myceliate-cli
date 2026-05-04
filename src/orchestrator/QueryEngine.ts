@@ -14,6 +14,11 @@ export type QueryEngineOptions = {
   protectedTailMessages?: number;
   protectedTailTokens?: number;
   maxToolOutputChars?: number;
+  /** Phase 18: rehydrate from a prior session's saved history. Pushed onto
+   * the private history array verbatim — no validation here; the caller
+   * (src/index.ts --resume path) is responsible for rejecting sessions
+   * that end mid-tool-call via isSafeToResume(). */
+  initialHistory?: readonly Message[];
 };
 
 const DEFAULT_THRESHOLDS = {
@@ -29,7 +34,7 @@ export class QueryEngine {
   private readonly history: Message[] = [];
   private readonly checker: BudgetChecker;
   private readonly system: Message;
-  private readonly opts: Required<Omit<QueryEngineOptions, 'thresholds'>> & {
+  private readonly opts: Required<Omit<QueryEngineOptions, 'thresholds' | 'initialHistory'>> & {
     thresholds: BudgetThresholds;
   };
 
@@ -49,6 +54,9 @@ export class QueryEngine {
     };
     this.system = { role: 'system', content: opts.systemPrompt };
     this.checker = new BudgetChecker(thresholds);
+    if (opts.initialHistory) {
+      for (const m of opts.initialHistory) this.history.push(m);
+    }
   }
 
   appendUser(content: string): void {

@@ -26,7 +26,7 @@ describe('bashTool', () => {
     });
     const out = await tool.run(
       { command: 'echo ok' },
-      { cwd: '/tmp', abort: new AbortController().signal },
+      { cwd: '/tmp', abort: new AbortController().signal, toolUseId: 'test-call-id' },
     );
     expect(out).toContain('exitCode: 0');
     expect(out).toContain('ok');
@@ -45,7 +45,10 @@ describe('bashTool', () => {
       defaultTimeoutMs: 1000,
     });
     await expect(
-      tool.run({ command: 'rm -rf /' }, { cwd: '/tmp', abort: new AbortController().signal }),
+      tool.run(
+        { command: 'rm -rf /' },
+        { cwd: '/tmp', abort: new AbortController().signal, toolUseId: 'test-call-id' },
+      ),
     ).rejects.toThrow(/no thanks/);
     expect(queue.add).not.toHaveBeenCalled();
   });
@@ -63,7 +66,7 @@ describe('bashTool', () => {
     });
     await tool.run(
       { command: 'sudo apt update' },
-      { cwd: '/tmp', abort: new AbortController().signal },
+      { cwd: '/tmp', abort: new AbortController().signal, toolUseId: 'test-call-id' },
     );
     expect(queue.add).toHaveBeenCalledOnce();
   });
@@ -82,7 +85,10 @@ describe('bashTool', () => {
       defaultTimeoutMs: 1000,
     });
     await expect(
-      tool.run({ command: 'echo ok' }, { cwd: '/tmp', abort: new AbortController().signal }),
+      tool.run(
+        { command: 'echo ok' },
+        { cwd: '/tmp', abort: new AbortController().signal, toolUseId: 'test-call-id' },
+      ),
     ).rejects.toThrow(/worker exploded/);
     expect(queue.add).toHaveBeenCalledOnce();
   });

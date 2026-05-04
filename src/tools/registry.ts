@@ -16,6 +16,10 @@ export type Tool<Input> = {
 export type ToolRunContext = {
   cwd: string;
   abort: AbortSignal;
+  /** Originating tool_call.id from the LLM stream. Phase 17 m5 fix: threaded
+   * here so HITL-gated tools (bash) can identify which call's approval slot
+   * the user is responding to in src/index.ts's Map<requestId, fn>. */
+  toolUseId: string;
 };
 
 export class ToolRegistry {
@@ -45,6 +49,7 @@ export class ToolRegistry {
     const fullCtx: ToolRunContext = {
       cwd: ctx?.cwd ?? process.cwd(),
       abort: ctx?.abort ?? new AbortController().signal,
+      toolUseId: ctx?.toolUseId ?? '',
     };
     return tool.run(parsed, fullCtx);
   }

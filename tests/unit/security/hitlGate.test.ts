@@ -7,7 +7,11 @@ describe('HitlGate', () => {
 
   it('passes through commands deemed safe by isDangerous', async () => {
     const gate = new HitlGate({ requestApproval: vi.fn() });
-    const verdict = await gate.checkBash({ command: 'ls -la', cwd: process.cwd() });
+    const verdict = await gate.checkBash({
+      command: 'ls -la',
+      cwd: process.cwd(),
+      requestId: 'test-id',
+    });
     expect(verdict.allowed).toBe(true);
     expect(verdict.requiredApproval).toBe(false);
   });
@@ -15,7 +19,11 @@ describe('HitlGate', () => {
   it('routes dangerous commands to requestApproval and respects approve', async () => {
     const requestApproval = vi.fn().mockResolvedValue({ decision: 'approve' });
     const gate = new HitlGate({ requestApproval });
-    const verdict = await gate.checkBash({ command: 'rm -rf /tmp/foo/', cwd: process.cwd() });
+    const verdict = await gate.checkBash({
+      command: 'rm -rf /tmp/foo/',
+      cwd: process.cwd(),
+      requestId: 'test-id',
+    });
     expect(verdict.allowed).toBe(true);
     expect(verdict.requiredApproval).toBe(true);
     expect(requestApproval).toHaveBeenCalled();
@@ -26,7 +34,11 @@ describe('HitlGate', () => {
       .fn()
       .mockResolvedValue({ decision: 'reject', feedback: 'too broad' });
     const gate = new HitlGate({ requestApproval });
-    const verdict = await gate.checkBash({ command: 'sudo rm -rf ~', cwd: process.cwd() });
+    const verdict = await gate.checkBash({
+      command: 'sudo rm -rf ~',
+      cwd: process.cwd(),
+      requestId: 'test-id',
+    });
     expect(verdict.allowed).toBe(false);
     expect(verdict.feedback).toBe('too broad');
   });
@@ -42,10 +54,12 @@ describe('HitlGate', () => {
     const gate = new HitlGate({ requestApproval });
 
     let settled = false;
-    const checkPromise = gate.checkBash({ command: 'rm -rf /', cwd: process.cwd() }).then((v) => {
-      settled = true;
-      return v;
-    });
+    const checkPromise = gate
+      .checkBash({ command: 'rm -rf /', cwd: process.cwd(), requestId: 'test-id' })
+      .then((v) => {
+        settled = true;
+        return v;
+      });
 
     // Let the microtask queue drain — checkBash has called requestApproval,
     // but approvalPromise has not yet resolved.
@@ -61,14 +75,15 @@ describe('HitlGate', () => {
     expect(verdict.requiredApproval).toBe(true);
   });
 
-  it('requestApproval is called with command, cwd, and reason fields', async () => {
+  it('requestApproval is called with command, cwd, requestId, and reason fields', async () => {
     const requestApproval = vi.fn().mockResolvedValue({ decision: 'approve' });
     const gate = new HitlGate({ requestApproval });
     const cwd = process.cwd();
-    await gate.checkBash({ command: 'sudo apt-get install vim', cwd });
+    await gate.checkBash({ command: 'sudo apt-get install vim', cwd, requestId: 'test-id' });
     expect(requestApproval).toHaveBeenCalledWith({
       command: 'sudo apt-get install vim',
       cwd,
+      requestId: 'test-id',
       reason: expect.any(String),
     });
   });
@@ -81,7 +96,11 @@ describe('HitlGate', () => {
       .fn()
       .mockResolvedValue({ decision: 'approve', feedback: 'looks okay' });
     const gate = new HitlGate({ requestApproval });
-    const verdict = await gate.checkBash({ command: 'rm -rf /', cwd: process.cwd() });
+    const verdict = await gate.checkBash({
+      command: 'rm -rf /',
+      cwd: process.cwd(),
+      requestId: 'test-id',
+    });
     expect(verdict.allowed).toBe(true);
     expect(verdict.requiredApproval).toBe(true);
     // TypeScript discriminated union: `feedback` is only present on the false arm.
@@ -96,7 +115,11 @@ describe('HitlGate', () => {
     // When the approval response has no feedback field, the gate provides a default.
     const requestApproval = vi.fn().mockResolvedValue({ decision: 'reject' });
     const gate = new HitlGate({ requestApproval });
-    const verdict = await gate.checkBash({ command: 'sudo rm -rf ~', cwd: process.cwd() });
+    const verdict = await gate.checkBash({
+      command: 'sudo rm -rf ~',
+      cwd: process.cwd(),
+      requestId: 'test-id',
+    });
     expect(verdict.allowed).toBe(false);
     if (!verdict.allowed) {
       expect(typeof verdict.feedback).toBe('string');
@@ -107,7 +130,7 @@ describe('HitlGate', () => {
   it('safe commands never call requestApproval', async () => {
     const requestApproval = vi.fn();
     const gate = new HitlGate({ requestApproval });
-    await gate.checkBash({ command: 'echo hello', cwd: process.cwd() });
+    await gate.checkBash({ command: 'echo hello', cwd: process.cwd(), requestId: 'test-id' });
     expect(requestApproval).not.toHaveBeenCalled();
   });
 
@@ -116,8 +139,25 @@ describe('HitlGate', () => {
     // should bubble to the orchestrator rather than being swallowed into a silent verdict.
     const requestApproval = vi.fn().mockRejectedValue(new Error('UI crashed'));
     const gate = new HitlGate({ requestApproval });
-    await expect(gate.checkBash({ command: 'rm -rf /', cwd: process.cwd() })).rejects.toThrow(
-      'UI crashed',
-    );
+    await expect(
+      gate.checkBash({ command: 'rm -rf /', cwd: process.cwd(), requestId: 'test-id' }),
+    ).rejects.toThrow('UI crashed');
+  });
+
+  it('threads requestId through ApprovalRequest and exposes it to the requestApproval callback', async () => {
+    let observedRequestId: string | undefined;
+    const hitl = new HitlGate({
+      requestApproval: async (req) => {
+        observedRequestId = req.requestId;
+        return { decision: 'reject', feedback: 'no' };
+      },
+    });
+    const verdict = await hitl.checkBash({
+      command: 'rm -rf /',
+      cwd: '/tmp',
+      requestId: 'tool-call-abc-123',
+    });
+    expect(observedRequestId).toBe('tool-call-abc-123');
+    expect(verdict.allowed).toBe(false);
   });
 });

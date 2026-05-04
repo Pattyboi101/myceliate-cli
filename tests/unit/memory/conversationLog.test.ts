@@ -1,5 +1,5 @@
 // tests/unit/memory/conversationLog.test.ts
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -93,5 +93,99 @@ describe('ConversationLog redaction (Task 81a)', () => {
     const out = await readSessionFile('sess-clean');
     expect(out).toContain('hello world, no secrets here');
     expect(out).not.toContain('[REDACTED:');
+  });
+});
+
+describe('ConversationLog JSONL sidecar + readSession (Phase 18)', () => {
+  let tmp: string;
+  let store: MarkdownStore;
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'myc-conv-resume-'));
+    store = new MarkdownStore(tmp);
+  });
+
+  afterEach(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('writes both .md and .jsonl on each appendTurn', async () => {
+    const log = new ConversationLog(store, 'sess1');
+    await log.appendTurn({ role: 'user', content: 'hello' });
+    await log.appendTurn({ role: 'assistant', content: 'hi there' });
+
+    const md = await readFile(join(tmp, 'history', 'sess1.md'), 'utf8');
+    expect(md).toContain('### user');
+    expect(md).toContain('hello');
+
+    const jsonl = await readFile(join(tmp, 'history', 'sess1.jsonl'), 'utf8');
+    const lines = jsonl.trim().split('\n');
+    expect(lines).toHaveLength(2);
+    const line0 = lines[0];
+    const line1 = lines[1];
+    if (!line0 || !line1) throw new Error('expected 2 lines');
+    expect(JSON.parse(line0)).toEqual({ role: 'user', content: 'hello' });
+    expect(JSON.parse(line1)).toEqual({ role: 'assistant', content: 'hi there' });
+  });
+
+  it('redacts secrets in JSONL just like the .md (round-trip preserves redaction)', async () => {
+    const log = new ConversationLog(store, 'sess2');
+    await log.appendTurn({
+      role: 'user',
+      content: 'set OPENAI_API_KEY=sk-realLooking1234567890abcdef',
+    });
+    const jsonl = await readFile(join(tmp, 'history', 'sess2.jsonl'), 'utf8');
+    expect(jsonl).not.toContain('sk-realLooking1234567890abcdef');
+    expect(jsonl).toContain('[REDACTED:');
+  });
+
+  it('readSession round-trips messages from the JSONL', async () => {
+    const log = new ConversationLog(store, 'sess3');
+    await log.appendTurn({ role: 'user', content: 'first' });
+    await log.appendTurn({
+      role: 'assistant',
+      content: 'second',
+      reasoning_content: 'thinking',
+      tool_calls: [{ id: 't1', name: 'bash', args: { command: 'ls' } }],
+    });
+    await log.appendTurn({
+      role: 'tool',
+      result: {
+        tool_use_id: 't1',
+        command: 'bash {"command":"ls"}',
+        is_error: false,
+        content: 'README.md',
+      },
+    });
+
+    const messages = await ConversationLog.readSession(store, 'sess3');
+    expect(messages).toHaveLength(3);
+    expect(messages[0]?.role).toBe('user');
+    expect(messages[1]?.role).toBe('assistant');
+    expect(messages[2]?.role).toBe('tool');
+    if (messages[1]?.role === 'assistant') {
+      expect(messages[1].tool_calls).toHaveLength(1);
+      expect(messages[1].tool_calls?.[0]?.id).toBe('t1');
+    }
+  });
+
+  it('readSession returns empty array when the session does not exist', async () => {
+    const messages = await ConversationLog.readSession(store, 'no-such-session');
+    expect(messages).toEqual([]);
+  });
+
+  it('readSession skips malformed JSONL lines and continues parsing', async () => {
+    const dir = join(tmp, 'history');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'sess4.jsonl'),
+      `{"role":"user","content":"a"}\n<<< not json >>>\n{"role":"user","content":"b"}\n`,
+      'utf8',
+    );
+    const messages = await ConversationLog.readSession(store, 'sess4');
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.role).toBe('user');
+    expect((messages[0] as { content: string }).content).toBe('a');
+    expect((messages[1] as { content: string }).content).toBe('b');
   });
 });

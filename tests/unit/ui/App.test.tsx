@@ -145,3 +145,34 @@ it('renders ToolCallCard for each entry in state.toolCalls', () => {
   expect(lastFrame()).toContain('25ms');
   expect(lastFrame()).toContain('foo.ts');
 });
+
+it('expands the most recent ToolCallCard when Tab is pressed (after reasoning toggle precedence)', async () => {
+  const state: AppState = {
+    userInput: 'go',
+    reasoning: null,
+    content: '',
+    approvalRequest: null,
+    phase: 'streaming',
+    turns: [],
+    toolCalls: [
+      {
+        id: 't1',
+        name: 'bash',
+        args: { command: 'seq 50' },
+        status: 'completed',
+        durationMs: 10,
+        preview: Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n'),
+      },
+    ],
+  };
+  const { stdin, lastFrame } = render(<App state={state} />);
+  await new Promise((r) => setTimeout(r, 50));
+  expect(lastFrame()).not.toContain('line 49'); // collapsed by default
+  stdin.write('\t'); // Tab
+  // 50ms matches Phase 10's keypress-timing rule (Ink's setRawMode/readable
+  // listener registration); shorter waits are CI-flaky.
+  await new Promise((r) => setTimeout(r, 50));
+  // When state.reasoning is null, the Tab handler routes to setCardExpanded
+  // and the latest card expands.
+  expect(lastFrame()).toContain('line 49');
+});

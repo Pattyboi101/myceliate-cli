@@ -13,6 +13,8 @@ export type ReplSessionOptions = {
   cwd: string;
   systemPrompt?: string;
   workingBudget?: number;
+  /** Phase 18: pre-rehydrated initial history for --resume <id>. */
+  initialHistory?: readonly Message[];
   /** Streamed events from each turn — consumer wires this to App state. */
   onState: (ev: StreamEvent) => void;
   /** Fires once after each terminal turn with the engine snapshot. */
@@ -30,6 +32,8 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
   const engine = new QueryEngine({
     systemPrompt: opts.systemPrompt ?? 'You are myceliate, an autonomous CLI agent.',
     workingBudget: opts.workingBudget ?? 200_000,
+    // exactOptionalPropertyTypes: conditional spread so the key is absent when not provided.
+    ...(opts.initialHistory ? { initialHistory: opts.initialHistory } : {}),
   });
 
   while (true) {

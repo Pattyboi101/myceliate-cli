@@ -8,6 +8,7 @@ import { QueueEvents } from 'bullmq';
 import { render } from 'ink';
 import React from 'react';
 import type { DeepSeekClient } from './adapters/DeepSeekClient.js';
+import type { Message } from './adapters/messages.js';
 import type { StreamEvent } from './adapters/streamEvent.js';
 import { V3Adapter } from './adapters/v3/adapter.js';
 import { V4Adapter } from './adapters/v4/adapter.js';
@@ -17,6 +18,7 @@ import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
 import { runReplSession } from './runtime/replSession.js';
+import { buildTurnsFromHistory, isSafeToResume } from './runtime/resume.js';
 import { startWorker } from './runtime/workerLifecycle.js';
 import { type ApprovalRequest, type ApprovalResponse, HitlGate } from './security/hitlGate.js';
 import { createBashTool } from './tools/bash.js';
@@ -29,6 +31,21 @@ import { App, type AppState, type CompletedTurn } from './ui/App.js';
 import { runOnboarding } from './ui/onboarding.js';
 import { createLogger } from './util/logger.js';
 
+/**
+ * Parse --resume <id> from argv. Returns the session-id string if present,
+ * or undefined if the flag is absent. Throws if --resume appears without an
+ * argument or with another flag as its value.
+ */
+function parseResumeFlag(argv: readonly string[]): string | undefined {
+  const idx = argv.indexOf('--resume');
+  if (idx === -1) return undefined;
+  const id = argv[idx + 1];
+  if (!id || id.startsWith('--')) {
+    throw new Error('--resume requires a session-id argument (e.g., --resume abc-123)');
+  }
+  return id;
+}
+
 async function main(): Promise<void> {
   const onboarding = await runOnboarding({
     ...(process.env.DEEPSEEK_API_KEY ? { apiKey: process.env.DEEPSEEK_API_KEY } : {}),
@@ -38,11 +55,33 @@ async function main(): Promise<void> {
     ...(process.env.DEEPSEEK_MODEL ? { model: process.env.DEEPSEEK_MODEL } : {}),
   });
 
+  // Phase 18: parse --resume before heavy initialisation so we can exit early
+  // on an invalid flag without spinning up Redis, Ink, etc.
+  const resumeId = parseResumeFlag(process.argv.slice(2));
+
   const ctx = await senseContext({ cwd: process.cwd() });
-  const sessionId = randomUUID();
+  const sessionId = resumeId ?? randomUUID();
   const logger = createLogger({ logsDir: join(ctx.memoryDir, 'logs') });
   const memory = new MarkdownStore(ctx.memoryDir);
   const conversation = new ConversationLog(memory, sessionId);
+
+  // Phase 18: rehydrate prior session history if --resume was passed.
+  // approvalResolvers and pendingApprovals intentionally start EMPTY — prior
+  // session's Promise resolvers do not survive process exit (carry-forward #2).
+  let initialHistory: readonly Message[] | undefined;
+  let initialTurns: CompletedTurn[] = [];
+  if (resumeId !== undefined) {
+    const rehydrated = await ConversationLog.readSession(memory, resumeId);
+    if (!isSafeToResume(rehydrated)) {
+      console.error(
+        `Cannot resume session ${resumeId}: last assistant turn has unanswered tool_calls.\nThe session was interrupted mid-flow. v1.2 refuses; v1.3 may add recovery.`,
+      );
+      process.exit(1);
+    }
+    initialHistory = rehydrated;
+    // Rebuild AppState.turns from rehydrated history so the UI shows prior context.
+    initialTurns = buildTurnsFromHistory(rehydrated);
+  }
 
   const baseUrl = process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com';
   const client: DeepSeekClient =
@@ -56,13 +95,15 @@ async function main(): Promise<void> {
   // PromptInput render before the user submits anything. Removes the Clack
   // "What would you like the agent to do?" interrupt and gives the chat-like
   // start Patrick wanted.
+  // Phase 18: on --resume, populate turns with prior context and drop straight
+  // into `awaiting_input` with the rehydrated history visible.
   let state: AppState = {
     userInput: '',
     reasoning: null,
     content: '',
     approvalRequests: [],
     phase: 'awaiting_input',
-    turns: [],
+    turns: initialTurns,
     toolCalls: [],
   };
   const banner = {
@@ -135,9 +176,13 @@ async function main(): Promise<void> {
   let reasoningText = '';
   let contentText = '';
   // Phase 12.5: every prompt now arrives via PromptInput, so there's no
-  // pre-loop user message. lastSnapshotLen starts at 0 and tracks the conv-log
-  // delta from there.
-  let lastSnapshotLen = 0;
+  // pre-loop user message. lastSnapshotLen tracks the conv-log delta so
+  // onTurnComplete only writes new messages to disk on each turn.
+  // Phase 18: on --resume, start at the rehydrated history length so we do
+  // NOT re-write the prior session's messages back to disk (they are already
+  // in the .jsonl + .md). Without this, the first onTurnComplete call would
+  // snapshot.slice(0) and re-append every rehydrated message, duplicating the log.
+  let lastSnapshotLen = initialHistory?.length ?? 0;
 
   try {
     await runReplSession({
@@ -147,6 +192,8 @@ async function main(): Promise<void> {
       cwd: process.cwd(),
       systemPrompt: buildSystemPrompt(ctx),
       workingBudget: Number(process.env.WORKING_TOKEN_BUDGET ?? 200_000),
+      // exactOptionalPropertyTypes: conditional spread so the key is absent when not set.
+      ...(initialHistory ? { initialHistory } : {}),
       onState: (ev: StreamEvent) => {
         if (ev.type === 'reasoning_delta') {
           reasoningText += ev.text;

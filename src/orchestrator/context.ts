@@ -3,51 +3,14 @@ import { spawn } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadProjectClaudeMd } from '../memory/claudeMd.js';
+import { isSecretFile } from '../security/secretFileFilter.js';
 
-/**
- * Filenames stripped from `dirEntries` before injection into the system prompt.
- * Filename leakage (the entry NAMES, not contents) gives the LLM a hint about
- * the project's secret-adjacent surface; this filter prevents `.env`,
- * `secrets.json`, `id_rsa`, etc. from appearing in the prompt's "cwd entries:"
- * line. Contents are NEVER disclosed by senseContext — this is a defense-in-depth
- * filter on names only.
- *
- * To extend: add to SECRET_FILE_NAMES (exact match) or SECRET_FILE_EXTENSIONS
- * (suffix match). Both checks are case-sensitive — file systems vary, but the
- * LLM-facing prompt is opt-in over-redaction.
- *
- * Known limitation: on case-insensitive filesystems (macOS HFS+/APFS default),
- * `.ENV` or `ID_RSA` would slip through. Linux (case-sensitive) is the target
- * platform for v1.2; re-evaluate in v2 if macOS support is added.
- */
-const SECRET_FILE_NAMES = new Set([
-  '.env',
-  '.env.local',
-  '.env.production',
-  '.env.development',
-  '.env.test',
-  '.git',
-  '.myceliate',
-  'id_rsa',
-  'id_ed25519',
-  'id_ecdsa',
-  'id_dsa',
-  'secrets.json',
-  'credentials',
-  'credentials.json',
-]);
-
-const SECRET_FILE_EXTENSIONS = new Set(['.key', '.pem', '.p12', '.pfx', '.cer', '.crt']);
-
-function isSecretFile(name: string): boolean {
-  if (SECRET_FILE_NAMES.has(name)) return true;
-  const dot = name.lastIndexOf('.');
-  if (dot > 0) {
-    const ext = name.slice(dot);
-    if (SECRET_FILE_EXTENSIONS.has(ext)) return true;
-  }
-  return false;
-}
+// Phase 16 review (MAJOR-1): the secret-file filter previously lived inline here
+// and protected only the system-prompt's `cwd entries:` injection. The same
+// filter must apply to `src/tools/listDir.ts` (the agent-facing list_dir tool)
+// so an execution sub-agent cannot bypass the system-prompt filter and read
+// secret-adjacent filenames via tool dispatch. The filter logic now lives in
+// `src/security/secretFileFilter.ts` and is shared by both callers.
 
 export type SessionContext = {
   cwd: string;

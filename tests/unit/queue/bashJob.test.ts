@@ -108,7 +108,14 @@ describe('runBashJob', () => {
     }
   });
 
-  it('preserves the safelisted PATH/HOME/USER/PWD/TERM in the bash subprocess', async () => {
+  it('preserves PATH and HOME and USER in the bash subprocess (representative of the full safelist)', async () => {
+    // Phase 16 review m2: the title previously claimed all five
+    // (PATH/HOME/USER/PWD/TERM) but the body only asserted PATH/HOME/USER.
+    // The full safelist is PATH/HOME/USER/PWD/TERM/LANG/LC_ALL; asserting
+    // these three (the universally-set ones across CI environments) is a
+    // representative sample. PWD/TERM/LANG/LC_ALL inheritance is verified
+    // structurally by the SAFELISTED_ENV_KEYS constant + the
+    // `if (value !== undefined) safe[key] = value` guard in buildSafeEnv.
     const result = await runBashJob({
       command: 'echo "PATH=$PATH|HOME=$HOME|USER=$USER"',
       cwd: process.cwd(),

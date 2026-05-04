@@ -169,9 +169,10 @@ it('expands the most recent ToolCallCard when Tab is pressed (after reasoning to
   await new Promise((r) => setTimeout(r, 50));
   expect(lastFrame()).not.toContain('line 49'); // collapsed by default
   stdin.write('\t'); // Tab
-  await new Promise((r) => setTimeout(r, 10));
-  // First Tab press flips the existing reasoningExpanded state, but reasoning is null —
-  // so the card-expand should claim the keystroke instead. Implementation detail: track
-  // a `cardExpanded` boolean in App; flip it before reasoningExpanded if reasoning is null.
+  // 50ms matches Phase 10's keypress-timing rule (Ink's setRawMode/readable
+  // listener registration); shorter waits are CI-flaky.
+  await new Promise((r) => setTimeout(r, 50));
+  // When state.reasoning is null, the Tab handler routes to setCardExpanded
+  // and the latest card expands.
   expect(lastFrame()).toContain('line 49');
 });

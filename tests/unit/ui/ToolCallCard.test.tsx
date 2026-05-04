@@ -74,9 +74,33 @@ describe('ToolCallCard', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('line 0');
     expect(frame).toContain('line 4');
-    // 5-line collapsed view default — line 5 onwards is hidden.
+    // 5-line collapsed view default — line 5 onwards is hidden. Phase 15
+    // review n1: assert the exact boundary (`line 5` absent) so a regression
+    // increasing COLLAPSED_LINES to 6 fails loudly. `'line 4'` would otherwise
+    // also substring-match `'line 40'`–`'line 49'`.
+    expect(frame).not.toContain('line 5');
     expect(frame).not.toContain('line 49');
     expect(frame).toContain('… 45 more lines');
+  });
+
+  // Phase 15 review coverage gap #2: lock the slice boundary at exactly N.
+  // An off-by-one in either visibleLines.slice or hiddenCount math would
+  // produce a spurious "… 0 more lines" footer; this test guards against it.
+  it('renders all lines without footer when preview has exactly COLLAPSED_LINES lines', () => {
+    const lines = Array.from({ length: 5 }, (_, i) => `line ${i}`).join('\n');
+    const card: ToolCallCardState = {
+      id: 't1',
+      name: 'bash',
+      args: { command: 'seq 5' },
+      status: 'completed',
+      durationMs: 5,
+      preview: lines,
+    };
+    const { lastFrame } = render(<ToolCallCard card={card} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('line 0');
+    expect(frame).toContain('line 4');
+    expect(frame).not.toMatch(/more lines/);
   });
 
   it('renders the full preview when expanded prop is true', () => {
@@ -104,9 +128,14 @@ describe('ToolCallCard', () => {
     };
     const { lastFrame } = render(<ToolCallCard card={card} />);
     const frame = lastFrame() ?? '';
-    // Magenta ANSI sequence — Ink uses standard chalk colors.
+    // Text-presence + structural-preservation assertion. The actual magenta
+    // color cannot be asserted here — `ink-testing-library`'s `lastFrame()`
+    // strips ANSI escapes when running in a non-TTY (chalk's `supportsColor`
+    // detection returns false under vitest). Color is verified by the v1.1
+    // manual smoke (docs/MANUAL_SMOKE.md → Redaction visibility section).
+    // v1.2 could force-enable chalk via `FORCE_COLOR=3` in the test setup
+    // and assert `/\x1b\[35m[^\x1b]*\[REDACTED:env_value\]/`.
     expect(frame).toContain('[REDACTED:env_value]');
-    // The plain line should appear unchanged.
     expect(frame).toContain('OTHER=plain');
   });
 });

@@ -80,4 +80,43 @@ describe('runBashJob', () => {
     expect(result.stderr.length).toBeGreaterThan(0);
     expect(result.exitCode).not.toBe(0);
   });
+
+  it('does NOT inherit DEEPSEEK_API_KEY or other arbitrary parent env vars into the bash subprocess', async () => {
+    const original = {
+      key: process.env.DEEPSEEK_API_KEY,
+      profile: process.env.AWS_PROFILE,
+      sock: process.env.SSH_AUTH_SOCK,
+    };
+    process.env.DEEPSEEK_API_KEY = 'sk-fake-test-key-1234567890abcdef';
+    process.env.AWS_PROFILE = 'fake-aws-profile';
+    process.env.SSH_AUTH_SOCK = '/tmp/fake-ssh-sock';
+    try {
+      const result = await runBashJob({
+        command: 'echo "K=$DEEPSEEK_API_KEY|A=$AWS_PROFILE|S=$SSH_AUTH_SOCK"',
+        cwd: process.cwd(),
+        timeoutMs: 5000,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe('K=|A=|S=');
+    } finally {
+      if (original.key === undefined) Reflect.deleteProperty(process.env, 'DEEPSEEK_API_KEY');
+      else process.env.DEEPSEEK_API_KEY = original.key;
+      if (original.profile === undefined) Reflect.deleteProperty(process.env, 'AWS_PROFILE');
+      else process.env.AWS_PROFILE = original.profile;
+      if (original.sock === undefined) Reflect.deleteProperty(process.env, 'SSH_AUTH_SOCK');
+      else process.env.SSH_AUTH_SOCK = original.sock;
+    }
+  });
+
+  it('preserves the safelisted PATH/HOME/USER/PWD/TERM in the bash subprocess', async () => {
+    const result = await runBashJob({
+      command: 'echo "PATH=$PATH|HOME=$HOME|USER=$USER"',
+      cwd: process.cwd(),
+      timeoutMs: 5000,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/PATH=\S+/);
+    expect(result.stdout).toMatch(/HOME=\S+/);
+    expect(result.stdout).toMatch(/USER=\S+/);
+  });
 });

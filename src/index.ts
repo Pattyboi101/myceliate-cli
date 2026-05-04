@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     userInput: '',
     reasoning: null,
     content: '',
-    approvalRequest: null,
+    approvalRequests: [],
     phase: 'awaiting_input',
     turns: [],
     toolCalls: [],
@@ -79,9 +79,11 @@ async function main(): Promise<void> {
     }
   };
 
-  // HITL UI bridge — mirrors the promptResolver pattern above.
-  // approvalResolver is set by HitlGate.requestApproval and resolved by onApprovalResponse.
-  let approvalResolver: ((r: ApprovalResponse) => void) | null = null;
+  // HITL UI bridge — Map<requestId, fn> pattern (Phase 17 m5 fix).
+  // Replaces the single-slot approvalResolver; concurrent HITL requests are
+  // keyed by their originating tool_call.id so neither orphans the other.
+  const approvalResolvers = new Map<string, (r: ApprovalResponse) => void>();
+  let pendingApprovals: ApprovalRequest[] = [];
 
   const ink = render(React.createElement(App, { state, banner, onPromptSubmit }));
   const rerender = (next: AppState): void => {
@@ -92,13 +94,17 @@ async function main(): Promise<void> {
   // onApprovalResponse must be defined after rerender (which it references).
   // It is forward-referenced safely in the render/rerender calls above because
   // the function is only called at runtime when the user responds to an approval prompt.
-  const onApprovalResponse = (r: ApprovalResponse): void => {
-    if (approvalResolver) {
-      const fn = approvalResolver;
-      approvalResolver = null;
-      fn(r);
-      rerender({ ...state, approvalRequest: null });
-    }
+  // noUncheckedIndexedAccess: pendingApprovals[0] returns ApprovalRequest | undefined.
+  // Use destructure-with-guard per Phase 15 review n3.
+  const onApprovalResponse = (response: ApprovalResponse): void => {
+    const head = pendingApprovals[0];
+    if (!head) return;
+    const fn = approvalResolvers.get(head.requestId);
+    if (!fn) return;
+    pendingApprovals = pendingApprovals.slice(1);
+    approvalResolvers.delete(head.requestId);
+    fn(response);
+    rerender({ ...state, approvalRequests: pendingApprovals });
   };
 
   // Re-render with onApprovalResponse now that it is defined.
@@ -107,8 +113,9 @@ async function main(): Promise<void> {
   const hitl = new HitlGate({
     requestApproval: (req: ApprovalRequest) =>
       new Promise<ApprovalResponse>((resolve) => {
-        approvalResolver = resolve;
-        rerender({ ...state, approvalRequest: req });
+        approvalResolvers.set(req.requestId, resolve);
+        pendingApprovals = [...pendingApprovals, req];
+        rerender({ ...state, approvalRequests: pendingApprovals });
       }),
   });
 
@@ -227,7 +234,7 @@ async function main(): Promise<void> {
           userInput: '',
           reasoning: null,
           content: '',
-          approvalRequest: null,
+          approvalRequests: [],
           phase: 'awaiting_input',
           turns,
           toolCalls: [],
@@ -241,7 +248,7 @@ async function main(): Promise<void> {
             userInput: text,
             reasoning: null,
             content: '',
-            approvalRequest: null,
+            approvalRequests: [],
             phase: 'streaming',
             turns: state.turns,
             toolCalls: [],

@@ -32,7 +32,11 @@ export type AppState = {
   userInput: string;
   reasoning: ReasoningState | null;
   content: string;
-  approvalRequest: ApprovalRequest | null;
+  /** FIFO queue of pending HITL approvals. The head is rendered as
+   * <ApprovalPrompt>; tail entries wait. Phase 17 m5 fix: replaces the
+   * single-slot approvalRequest field; src/index.ts maintains a parallel
+   * Map<requestId, fn> for resolver lookup. */
+  approvalRequests: ApprovalRequest[];
   /** REPL phase: streaming = a turn is in flight; awaiting_input = ready for next prompt. */
   phase: 'streaming' | 'awaiting_input';
   /** Append-only log of completed turns (rendered above the live region). */
@@ -115,12 +119,11 @@ export function App({
           {state.content.length > 0 && <ContentStream text={state.content} />}
         </>
       )}
-      {state.approvalRequest !== null && (
-        <ApprovalPrompt
-          request={state.approvalRequest}
-          onResponse={onApprovalResponse ?? (() => {})}
-        />
-      )}
+      {(() => {
+        const head = state.approvalRequests[0];
+        if (!head) return null;
+        return <ApprovalPrompt request={head} onResponse={onApprovalResponse ?? (() => {})} />;
+      })()}
       {state.phase === 'awaiting_input' && <PromptInput onSubmit={onPromptSubmit ?? (() => {})} />}
     </Box>
   );

@@ -10,7 +10,7 @@ it('renders <PromptInput> when phase is awaiting_input', () => {
     userInput: '',
     reasoning: null,
     content: '',
-    approvalRequest: null,
+    approvalRequests: [],
     phase: 'awaiting_input',
     turns: [],
     toolCalls: [],
@@ -25,7 +25,7 @@ it('hides <PromptInput> while streaming', () => {
     userInput: 'hi',
     reasoning: null,
     content: 'partial answer',
-    approvalRequest: null,
+    approvalRequests: [],
     phase: 'streaming',
     turns: [],
     toolCalls: [],
@@ -40,7 +40,7 @@ describe('App', () => {
       userInput: 'do thing',
       reasoning: { text: 'thinking', phase: 'streaming', startedAtMs: Date.now() },
       content: 'partial answer',
-      approvalRequest: null,
+      approvalRequests: [],
       phase: 'streaming',
       turns: [],
       toolCalls: [],
@@ -51,12 +51,12 @@ describe('App', () => {
     expect(f).toContain('partial answer');
   });
 
-  it('shows the approval prompt overlay when approvalRequest is present', () => {
+  it('shows the approval prompt overlay when approvalRequests has an entry', () => {
     const state: AppState = {
       userInput: 'do thing',
       reasoning: null,
       content: '',
-      approvalRequest: { command: 'rm -rf x', cwd: '/x', reason: 'why' },
+      approvalRequests: [{ requestId: 'r1', command: 'rm -rf x', cwd: '/x', reason: 'why' }],
       phase: 'streaming',
       turns: [],
       toolCalls: [],
@@ -74,7 +74,7 @@ describe('App', () => {
         startedAtMs: Date.now() - 3400,
       },
       content: '',
-      approvalRequest: null,
+      approvalRequests: [],
       phase: 'streaming',
       turns: [],
       toolCalls: [],
@@ -105,7 +105,7 @@ describe('App', () => {
       userInput: 'do thing',
       reasoning: { text: 'thinking', phase: 'complete', startedAtMs, endedAtMs },
       content: '',
-      approvalRequest: null,
+      approvalRequests: [],
       phase: 'streaming',
       turns: [],
       toolCalls: [],
@@ -119,6 +119,27 @@ describe('App', () => {
     const f2 = lastFrame() ?? '';
     // Same duration on re-render — frozen, not drifting.
     expect(f2).toMatch(/3\.4s/);
+  });
+
+  it('renders the head of state.approvalRequests as <ApprovalPrompt> and ignores tail entries', () => {
+    const state: AppState = {
+      userInput: 'go',
+      reasoning: null,
+      content: '',
+      approvalRequests: [
+        { requestId: 'r1', command: 'rm -rf /tmp/a', cwd: '/', reason: 'rm-rf' },
+        { requestId: 'r2', command: 'rm -rf /tmp/b', cwd: '/', reason: 'rm-rf' },
+      ],
+      phase: 'streaming',
+      turns: [],
+      toolCalls: [],
+    };
+    const { lastFrame } = render(<App state={state} />);
+    const frame = lastFrame() ?? '';
+    // Head is rendered.
+    expect(frame).toContain('rm -rf /tmp/a');
+    // Tail is NOT rendered (single-prompt-at-a-time UI).
+    expect(frame).not.toContain('rm -rf /tmp/b');
   });
 });
 
@@ -135,7 +156,7 @@ it('renders ToolCallCard for each entry in state.toolCalls', () => {
     userInput: 'go',
     reasoning: null,
     content: '',
-    approvalRequest: null,
+    approvalRequests: [],
     phase: 'streaming',
     turns: [],
     toolCalls: [toolCall],
@@ -151,7 +172,7 @@ it('expands the most recent ToolCallCard when Tab is pressed (after reasoning to
     userInput: 'go',
     reasoning: null,
     content: '',
-    approvalRequest: null,
+    approvalRequests: [],
     phase: 'streaming',
     turns: [],
     toolCalls: [

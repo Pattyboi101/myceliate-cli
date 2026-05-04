@@ -3,6 +3,13 @@ import { isDangerous } from './dangerousPatterns.js';
 
 /** The payload sent to the approval UI when a dangerous command is intercepted. */
 export type ApprovalRequest = {
+  /** Cross-module ID used by the UI bridge to look up the right resolver in
+   * a Map<requestId, fn>. Phase 17 m5 fix: src/index.ts maintains a Map
+   * keyed by this ID so concurrent HITL requests no longer orphan the first
+   * promise. The ID is the originating tool_call.id, threaded from
+   * runReactLoop through ToolRunContext.toolUseId into bash.ts's checkBash
+   * call. */
+  requestId: string;
   command: string;
   cwd: string;
   reason: string;
@@ -18,7 +25,7 @@ export type ApprovalResponse = { decision: 'approve' | 'reject'; feedback?: stri
 export type ApprovalRequester = (req: ApprovalRequest) => Promise<ApprovalResponse>;
 
 /** Input shape for `HitlGate.checkBash`. */
-export type BashCheck = { command: string; cwd: string };
+export type BashCheck = { command: string; cwd: string; requestId: string };
 
 /**
  * Discriminated union result from `HitlGate.checkBash`.
@@ -51,6 +58,7 @@ export class HitlGate {
 
     // Await the user's decision — this is the suspension point.
     const response = await this.opts.requestApproval({
+      requestId: input.requestId,
       command: input.command,
       cwd: input.cwd,
       reason: v.reason,

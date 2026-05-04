@@ -16,6 +16,10 @@ export type Tool<Input> = {
 export type ToolRunContext = {
   cwd: string;
   abort: AbortSignal;
+  /** Originating tool_call.id from the LLM stream. Phase 17 m5 fix: threaded
+   * here so HITL-gated tools (bash) can identify which call's approval slot
+   * the user is responding to in src/index.ts's Map<requestId, fn>. */
+  toolUseId: string;
 };
 
 export class ToolRegistry {
@@ -45,6 +49,17 @@ export class ToolRegistry {
     const fullCtx: ToolRunContext = {
       cwd: ctx?.cwd ?? process.cwd(),
       abort: ctx?.abort ?? new AbortController().signal,
+      // Phase 17 review m5-related: empty-string fallback is a SAFETY default
+      // for tests that construct ctx literals without an ID. Production
+      // callers (`runReactLoop`) always pass the LLM-provided `call.id`
+      // which is never empty. If a future v1.3+ phase introduces parallel
+      // tool dispatch where multiple concurrent invokes could hit this
+      // fallback (e.g., a test integration suite), replace `''` with
+      // `randomUUID()` — two concurrent requests both hitting the empty
+      // string would collide on `Map.set('', resolver)` in the HITL bridge
+      // and orphan the first promise (the m5 BLOCKER class of bug we just
+      // defused, in miniature).
+      toolUseId: ctx?.toolUseId ?? '',
     };
     return tool.run(parsed, fullCtx);
   }

@@ -63,7 +63,11 @@ export function createBashTool(deps: BashToolDeps): Tool<BashInput> {
       // to deps.defaultTimeoutMs. The `||` handles both Zod-default 0 and undefined.
       const timeoutMs = input.timeoutMs || defaultTimeout;
 
-      const verdict = await deps.hitl.checkBash({ command: input.command, cwd });
+      const verdict = await deps.hitl.checkBash({
+        command: input.command,
+        cwd,
+        requestId: ctx.toolUseId,
+      });
       if (!verdict.allowed) {
         // Cross-module string contract: src/orchestrator/reactLoop.ts catch block detects
         // this 'HITL rejected:' prefix to yield tool_result.status='rejected' instead of 'failed'.

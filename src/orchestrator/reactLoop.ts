@@ -88,6 +88,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
       try {
         const rawContent = await opts.tools.invoke(call.name, call.args, {
           cwd: opts.cwd ?? process.cwd(),
+          toolUseId: call.id,
           ...(opts.signal ? { abort: opts.signal } : {}),
         });
         const durationMs = Date.now() - startedAt;

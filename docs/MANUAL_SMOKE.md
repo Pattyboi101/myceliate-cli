@@ -88,3 +88,53 @@ The worker subprocess is auto-spawned by `main()` via `startWorker()` (Phase 14 
 - `streamEvent.ts` `tool_result.durationMs` JSDoc says "tools.invoke wall time" but on the failure path includes any artifact-offload time before the throw.
 - Worker subprocess assumes `pnpm` on PATH; npm/yarn deploys would need adapter (low priority — Patrick uses pnpm).
 - `cardExpanded` does not reset between REPL turns — the first card of turn N+1 inherits the toggle state from turn N. Documented in `App.tsx`; safe because `state.toolCalls` is cleared at the REPL boundary before the new turn's tool_calls arrive.
+
+## v1.3 — Spores
+
+These are walked against the live DeepSeek API. Allocate ~30 minutes.
+
+### 1. Fresh-project germination
+
+1. `cd /tmp && mkdir spore-smoke && cd spore-smoke`
+2. `myceliate`
+3. Type: "Help me think about IndieStack pricing for the hub product."
+4. **Expected:** orchestrator's first turn calls `germinate_spore('solo-business')`. UI shows a `<GerminationCard>` ("Germinating solo-business spore"). InputBox border shifts to amber.
+5. Continue: orchestrator should `spawn_subagent('pricing-analyst', ...)` or `spawn_subagent('ceo', ...)`. Sub-agent returns a structured answer.
+6. Verify: `cat .myceliate/sector.txt` → `solo-business`.
+
+### 2. /spore list
+
+1. In the same session, type: `/spore list`
+2. **Expected:** four spores listed (`solo-business`, `research`, `coding`, `meta`) with tier `[bundled]` (or `[user]` if you've authored your own), accent colour, persona count.
+
+### 3. /spore unpin → bare chat
+
+1. Type: `/spore unpin`
+2. **Expected:** InputBox border greys. `cat .myceliate/sector.txt` → file does not exist.
+3. Type a follow-up: "What's 2+2?". **Expected:** orchestrator answers without germinating any spore.
+
+### 4. /spore pin <name>
+
+1. Type: `/spore pin research`
+2. **Expected:** InputBox turns cyan-teal. `cat .myceliate/sector.txt` → `research`.
+3. Type a research-y prompt. **Expected:** orchestrator may spawn `lit-reviewer` or another research persona.
+
+### 5. --no-spore launch flag
+
+1. `cd /tmp/spore-smoke-2 && mkdir -p . && cd .`
+2. `myceliate --no-spore`
+3. Type: "Help me think about IndieStack pricing."
+4. **Expected:** orchestrator answers as bare chat. No germination card. InputBox stays grey throughout.
+
+### 6. Spore-creator dogfood
+
+1. `myceliate` in a fresh dir.
+2. Type: "I want to make a new spore for managing my Etsy shop."
+3. **Expected:** orchestrator germinates `meta` spore (or pins it via `/spore pin meta` if not auto-classified), spawns `spore-creator`. Sub-agent walks an interview.
+4. Answer through to the file-write step.
+5. Verify: `ls ~/.myceliate/skills/etsy-shop/` (or whatever name was given) → directory exists with `SKILL.md`, `myceliate.yaml`, `agents/<name>/SKILL.md`.
+6. Type: `/spore list` → new spore appears.
+
+### Pass criteria
+
+All 6 sections complete with no errors thrown. v1.3 tag candidate.

@@ -213,8 +213,8 @@ async function main(): Promise<void> {
       if (isGermination(ev)) {
         uiActiveSpore = { name: ev.spore, accent_color: ev.accent_color };
         rerender({ ...state, activeSpore: uiActiveSpore });
+        logger.info({ event: 'germination', spore: ev.spore });
       }
-      logger.info({ event: 'germination', spore: 'kind' in ev ? ev.spore : '?' });
     },
     appendSystemPrompt: (section) => {
       engineRef?.appendSystemSection(section);
@@ -267,7 +267,7 @@ async function main(): Promise<void> {
   const descs = spores.registry.getDescriptions();
   const descriptionsSection =
     descs.length > 0
-      ? `\n\n## Available sector spores\n\nWhen the user's first turn matches one of these sectors, call \`germinate_spore({name})\` to load that sector's persona roster. Otherwise just respond directly.\n\n${descs.map((d) => `- \`${d.name}\` (${d.accent_color}): ${d.description}`).join('\n')}\n`
+      ? `\n\n## Available sector spores\n\nIf the user's intent aligns with one of these sectors, you MUST call the \`germinate_spore({ name })\` tool immediately — before answering — to load that sector's persona roster into context. Skip germination only when the request is genuinely off-sector or trivially conversational ("what's 2+2", "hi"). Don't try to answer in-sector questions from base weights when the right spore is right there.\n\n${descs.map((d) => `- \`${d.name}\` (${d.accent_color}): ${d.description}`).join('\n')}\n`
       : '';
 
   try {

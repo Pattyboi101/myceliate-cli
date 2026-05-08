@@ -92,7 +92,7 @@ describe('integration: germinate -> spawn end-to-end', () => {
     expect(await readPin(cwd)).toBe('biz');
     expect(appended).toMatch(/Biz body/);
     expect(events).toContainEqual(
-      expect.objectContaining({ kind: 'germination', spore: 'biz', accent_color: '#c5a45f' }),
+      expect.objectContaining({ type: 'germination', spore: 'biz', accent_color: '#c5a45f' }),
     );
   });
 

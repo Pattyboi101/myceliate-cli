@@ -9,10 +9,13 @@ export type Usage = {
  * Emitted by `germinate_spore` when a sector spore is activated.
  * Flows through the orchestrator's event stream so the UI can
  * render a "Germinating <spore>" notification and update the accent colour.
- * Uses `kind` (not `type`) to distinguish from API-sourced events.
+ *
+ * Uses `type: 'germination'` like every other variant — unified discriminant
+ * keeps `switch (event.type)` exhaustiveness working and avoids the per-call
+ * `'kind' in e` guards that mixed-discriminant unions force.
  */
 export interface GerminationEvent {
-  kind: 'germination';
+  type: 'germination';
   spore: string;
   accent_color: string;
   message: string;
@@ -59,7 +62,7 @@ export type StreamEvent =
     };
 
 export const isGermination = (e: StreamEvent): e is GerminationEvent =>
-  'kind' in e && e.kind === 'germination';
+  'type' in e && e.type === 'germination';
 export const isReasoningDelta = (
   e: StreamEvent,
 ): e is Extract<StreamEvent, { type: 'reasoning_delta' }> =>

@@ -34,7 +34,12 @@ export class QueryEngine {
   private readonly history: Message[] = [];
   private readonly checker: BudgetChecker;
   private systemSections: string[];
-  private readonly opts: Required<Omit<QueryEngineOptions, 'thresholds' | 'initialHistory'>> & {
+  // `systemPrompt` lives in `systemSections` (mutable, so runtime germination
+  // can append). It's intentionally NOT stored in `opts` to avoid a second
+  // copy that would silently diverge.
+  private readonly opts: Required<
+    Omit<QueryEngineOptions, 'thresholds' | 'initialHistory' | 'systemPrompt'>
+  > & {
     thresholds: BudgetThresholds;
   };
 
@@ -45,7 +50,6 @@ export class QueryEngine {
       ...opts.thresholds,
     };
     this.opts = {
-      systemPrompt: opts.systemPrompt,
       workingBudget: opts.workingBudget,
       protectedTailMessages: opts.protectedTailMessages ?? 6,
       protectedTailTokens: opts.protectedTailTokens ?? 40_000,

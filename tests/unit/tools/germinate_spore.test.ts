@@ -60,7 +60,7 @@ describe('germinate_spore tool', () => {
     expect(appendedBody).toMatch(/demo body/);
     expect(await readPin(cwd)).toBe('demo');
     expect(events).toContainEqual(
-      expect.objectContaining({ kind: 'germination', spore: 'demo', accent_color: '#abcdef' }),
+      expect.objectContaining({ type: 'germination', spore: 'demo', accent_color: '#abcdef' }),
     );
   });
 

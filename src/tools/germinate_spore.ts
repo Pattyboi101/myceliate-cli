@@ -40,7 +40,7 @@ export function createGerminateSporeTool(deps: GerminateSporeDeps): GerminateSpo
       deps.appendSystemPrompt(delimited);
       await writePin(deps.cwd, spore.name);
       const event: GerminationEvent = {
-        kind: 'germination',
+        type: 'germination',
         spore: spore.name,
         accent_color: spore.manifest.accent_color,
         message: `Germinating ${spore.name} spore`,

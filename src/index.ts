@@ -285,6 +285,26 @@ async function main(): Promise<void> {
       onEngineReady: (engine) => {
         engineRef = engine;
       },
+      sporeRegistry: spores.registry,
+      onSlashOutput: (text) => {
+        // Phase 21: render slash command output as a completed turn (no streaming).
+        const newTurn: CompletedTurn = { userInput: '', content: text };
+        rerender({ ...state, turns: [...state.turns, newTurn] });
+      },
+      onActiveSporeChange: (name) => {
+        // Phase 21: /spore pin or /spore unpin changed the active spore.
+        if (name === null) {
+          uiActiveSpore = null;
+          activeSpore = null;
+        } else {
+          const rec = spores.registry.get(name);
+          if (rec) {
+            uiActiveSpore = { name, accent_color: rec.manifest.accent_color };
+            activeSpore = name;
+          }
+        }
+        rerender({ ...state, activeSpore: uiActiveSpore });
+      },
       onState: (ev: StreamEvent) => {
         if (isReasoningDelta(ev)) {
           reasoningText += ev.text;

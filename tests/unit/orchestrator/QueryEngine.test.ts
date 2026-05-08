@@ -234,3 +234,53 @@ describe('QueryEngine', () => {
     });
   });
 });
+
+describe('QueryEngine initialHistory (Phase 18 Task 109)', () => {
+  it('accepts initialHistory in constructor and exposes via snapshot()', () => {
+    const initialHistory: Message[] = [
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'hi' },
+    ];
+    const engine = new QueryEngine({
+      systemPrompt: 'sys',
+      workingBudget: 200_000,
+      initialHistory,
+    });
+    const snap = engine.snapshot();
+    expect(snap).toHaveLength(2);
+    expect(snap[0]?.role).toBe('user');
+    expect(snap[1]?.role).toBe('assistant');
+  });
+
+  it('initialHistory survives prepareRequest with no compaction (small history)', () => {
+    const engine = new QueryEngine({
+      systemPrompt: 'sys',
+      workingBudget: 200_000,
+      initialHistory: [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: 'hi' },
+      ],
+    });
+    const req = engine.prepareRequest({ model: 'm', tools: [], thinking: false, strict: true });
+    // [system, user, assistant]
+    expect(req.messages).toHaveLength(3);
+    expect(req.messages[0]?.role).toBe('system');
+    expect(req.messages[1]?.role).toBe('user');
+    expect(req.messages[2]?.role).toBe('assistant');
+  });
+
+  it('appendUser/appendAssistant after rehydration extends initialHistory', () => {
+    const engine = new QueryEngine({
+      systemPrompt: 'sys',
+      workingBudget: 200_000,
+      initialHistory: [{ role: 'user', content: 'first' }],
+    });
+    engine.appendAssistant({ content: 'hi' });
+    engine.appendUser('second');
+    const snap = engine.snapshot();
+    expect(snap).toHaveLength(3);
+    expect(snap[0]?.role).toBe('user');
+    expect(snap[1]?.role).toBe('assistant');
+    expect(snap[2]?.role).toBe('user');
+  });
+});

@@ -31,10 +31,17 @@ export type ArtifactPointer = {
 };
 
 export class MarkdownStore {
-  constructor(private readonly root: string) {}
+  // Phase 18: exposed as public so ConversationLog.readSession can construct the
+  // .jsonl path without routing through MarkdownStore's frontmatter parser (which
+  // would misparse a raw JSON line file as a Markdown record).
+  readonly baseDir: string;
+
+  constructor(root: string) {
+    this.baseDir = root;
+  }
 
   async write(path: string, frontmatter: Frontmatter, body: string): Promise<void> {
-    const abs = join(this.root, path);
+    const abs = join(this.baseDir, path);
     await mkdir(dirname(abs), { recursive: true });
     const fm =
       Object.keys(frontmatter).length === 0 ? '' : `---\n${serializeFrontmatter(frontmatter)}---\n`;
@@ -42,25 +49,25 @@ export class MarkdownStore {
   }
 
   async append(path: string, additional: string): Promise<void> {
-    const abs = join(this.root, path);
+    const abs = join(this.baseDir, path);
     await mkdir(dirname(abs), { recursive: true });
     await appendFile(abs, additional, 'utf8');
   }
 
   async read(path: string): Promise<MdRecord> {
-    const abs = join(this.root, path);
+    const abs = join(this.baseDir, path);
     const raw = await readFile(abs, 'utf8');
     return parseRecord(raw);
   }
 
   async list(subdir: string): Promise<string[]> {
-    const abs = join(this.root, subdir);
+    const abs = join(this.baseDir, subdir);
     const out: string[] = [];
     const visit = async (dir: string): Promise<void> => {
       const entries = await readdir(dir, { withFileTypes: true });
       for (const e of entries) {
         const full = join(dir, e.name);
-        if (e.isFile() && e.name.endsWith('.md')) out.push(relative(this.root, full));
+        if (e.isFile() && e.name.endsWith('.md')) out.push(relative(this.baseDir, full));
         else if (e.isDirectory()) await visit(full);
       }
     };
@@ -95,7 +102,7 @@ export class MarkdownStore {
     }
     const id = contentId(content);
     const artifactPath = `artifacts/${id}.md`;
-    const abs = join(this.root, artifactPath);
+    const abs = join(this.baseDir, artifactPath);
     await mkdir(dirname(abs), { recursive: true });
     await writeFile(abs, content, 'utf8');
     return {
@@ -116,7 +123,7 @@ export class MarkdownStore {
    * happens to start with `---\n`.
    */
   async readArtifact(pointer: ArtifactPointer): Promise<string> {
-    const abs = join(this.root, pointer.path);
+    const abs = join(this.baseDir, pointer.path);
     return readFile(abs, 'utf8');
   }
 }

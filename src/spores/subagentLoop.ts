@@ -61,6 +61,7 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
     }
     for (const call of toolCalls) {
       let resultContent: string;
+      // TODO(v1.4): rename to avoid shadowing isError import from streamEvent.ts
       let isError = false;
       try {
         resultContent = await registry.invoke(call.name, call.args, {

@@ -31,6 +31,7 @@ export class SporeRegistry {
       for (const spore of found) {
         const existing = accumulated.get(spore.name);
         if (existing) {
+          // TODO(v1.4): thread Logger via DI per CLAUDE.md U4
           console.warn(
             `[spores] override: ${spore.name} from ${existing.tier} (${existing.dir}) replaced by ${spore.tier} (${spore.dir})`,
           );
@@ -59,6 +60,7 @@ export class SporeRegistry {
         const spore = await SporeRegistry.loadSpore(tier, dir, name);
         out.push(spore);
       } catch (err) {
+        // TODO(v1.4): thread Logger via DI per CLAUDE.md U4
         console.warn(`[spores] skipped ${tier}/${name}: ${(err as Error).message}`);
       }
     }

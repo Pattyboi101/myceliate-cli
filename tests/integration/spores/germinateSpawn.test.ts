@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { QueryEngine } from '../../../src/orchestrator/QueryEngine.js';
 import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import { readPin } from '../../../src/spores/pinFile.js';
 import { createGerminateSporeTool } from '../../../src/tools/germinate_spore.js';
@@ -93,5 +94,49 @@ describe('integration: germinate -> spawn end-to-end', () => {
     expect(events).toContainEqual(
       expect.objectContaining({ kind: 'germination', spore: 'biz', accent_color: '#c5a45f' }),
     );
+  });
+
+  it('C1 regression: QueryEngine.appendSystemSection propagates germinated body into next prepareRequest', async () => {
+    const registry = await SporeRegistry.discover({
+      bundledDir,
+      userDir: '/none',
+      projectDir: '/none',
+    });
+
+    // 1. Build a real QueryEngine with a known initial system prompt.
+    const engine = new QueryEngine({
+      systemPrompt: 'Base system prompt.',
+      workingBudget: 200_000,
+    });
+
+    // 2. Wire germinateTool with appendSystemPrompt calling engine.appendSystemSection.
+    const germinate = createGerminateSporeTool({
+      registry,
+      cwd,
+      emit: () => {},
+      appendSystemPrompt: (section) => engine.appendSystemSection(section),
+    });
+
+    // 3. Call germinate for the 'biz' spore.
+    const result = await germinate.handler({ name: 'biz' });
+    expect(result.ok).toBe(true);
+
+    // 4. Build a prepareRequest and verify the system message contains the spore body.
+    const req = engine.prepareRequest({
+      model: 'test-model',
+      tools: [],
+      thinking: false,
+      strict: false,
+    });
+
+    // The system message is messages[0].
+    const sysMsg = req.messages[0];
+    expect(sysMsg).toBeDefined();
+    expect(sysMsg?.role).toBe('system');
+    if (sysMsg && 'content' in sysMsg && typeof sysMsg.content === 'string') {
+      expect(sysMsg.content).toContain('Base system prompt.');
+      // The germinated body should appear in the system message after appendSystemSection.
+      expect(sysMsg.content).toContain('Biz body');
+    }
   });
 });

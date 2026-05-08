@@ -21,12 +21,17 @@ export interface SpawnRequest {
   task: string;
 }
 
-export interface SpawnResponse {
-  ok: boolean;
-  summary?: string;
-  error?: string;
-  stderr_tail?: string;
-}
+export const SpawnResponseSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), summary: z.string() }).strict(),
+  z
+    .object({
+      ok: z.literal(false),
+      error: z.string(),
+      stderr_tail: z.string().optional(),
+    })
+    .strict(),
+]);
+export type SpawnResponse = z.infer<typeof SpawnResponseSchema>;
 
 export interface SpawnSubagentDeps {
   registry: SporeRegistry;
@@ -73,11 +78,11 @@ export function createSpawnSubagentTool(deps: SpawnSubagentDeps): SpawnSubagentT
       if (!response.ok) {
         return {
           ok: false,
-          error: response.error ?? 'unknown spawn error',
+          error: response.error,
           ...(response.stderr_tail ? { stderr_tail: response.stderr_tail } : {}),
         };
       }
-      return { ok: true, persona: personaRef.name, summary: response.summary ?? '' };
+      return { ok: true, persona: personaRef.name, summary: response.summary };
     },
   };
 }

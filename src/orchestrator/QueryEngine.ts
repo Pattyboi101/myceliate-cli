@@ -33,7 +33,7 @@ export type CompactionRefusal = Error & { kind: 'compaction_refused' };
 export class QueryEngine {
   private readonly history: Message[] = [];
   private readonly checker: BudgetChecker;
-  private readonly system: Message;
+  private systemSections: string[];
   private readonly opts: Required<Omit<QueryEngineOptions, 'thresholds' | 'initialHistory'>> & {
     thresholds: BudgetThresholds;
   };
@@ -52,11 +52,16 @@ export class QueryEngine {
       maxToolOutputChars: opts.maxToolOutputChars ?? 80_000,
       thresholds,
     };
-    this.system = { role: 'system', content: opts.systemPrompt };
+    this.systemSections = [opts.systemPrompt];
     this.checker = new BudgetChecker(thresholds);
     if (opts.initialHistory) {
       for (const m of opts.initialHistory) this.history.push(m);
     }
+  }
+
+  /** Append a section to the system prompt. New sections show up in the next prepareRequest call. */
+  appendSystemSection(section: string): void {
+    this.systemSections.push(section);
   }
 
   appendUser(content: string): void {
@@ -119,7 +124,8 @@ export class QueryEngine {
       }
     }
 
-    const messages: Message[] = [this.system, ...this.applyR2(working)];
+    const system: Message = { role: 'system', content: this.systemSections.join('') };
+    const messages: Message[] = [system, ...this.applyR2(working)];
     return {
       model: args.model,
       messages,

@@ -76,3 +76,7 @@ export const isError = (e: StreamEvent): e is Extract<StreamEvent, { type: 'erro
   'type' in e && e.type === 'error';
 export const isToolResult = (e: StreamEvent): e is Extract<StreamEvent, { type: 'tool_result' }> =>
   'type' in e && e.type === 'tool_result';
+export const isTurnComplete = (
+  e: StreamEvent,
+): e is Extract<StreamEvent, { type: 'turn_complete' }> =>
+  'type' in e && e.type === 'turn_complete';

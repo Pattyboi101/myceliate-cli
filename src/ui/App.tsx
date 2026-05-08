@@ -43,6 +43,13 @@ export type AppState = {
   turns: CompletedTurn[];
   /** Tool-call cards for the current turn (cleared on turn_complete). */
   toolCalls: ToolCallCardState[];
+  /**
+   * Phase 19: active sector spore for UI state (border color, etc.).
+   * Set when germinate_spore fires a GerminationEvent. Phase 21 will
+   * wire this to <InputBox> borderColor. Data flow established here so
+   * the plumbing exists when Phase 21 needs it.
+   */
+  activeSpore: { name: string; accent_color: string } | null;
 };
 
 export function App({

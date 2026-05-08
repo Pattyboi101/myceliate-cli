@@ -13,6 +13,7 @@ export async function readPin(cwd: string): Promise<string | null> {
     const raw = await readFile(pinPath(cwd), 'utf8');
     const trimmed = raw.trim();
     if (!KEBAB.test(trimmed)) {
+      // TODO(v1.4): thread Logger via DI per CLAUDE.md U4
       console.warn(
         `[spores] pin file ${pinPath(cwd)} contained invalid name "${trimmed}"; ignoring`,
       );

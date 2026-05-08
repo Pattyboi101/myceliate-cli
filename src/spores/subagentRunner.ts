@@ -22,6 +22,7 @@ const RequestSchema = z
 
 async function readAll(stream: NodeJS.ReadableStream): Promise<string> {
   const chunks: Buffer[] = [];
+  // TODO(v1.4): replace cast with Buffer.isBuffer guard
   for await (const chunk of stream)
     chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer));
   return Buffer.concat(chunks).toString('utf8');

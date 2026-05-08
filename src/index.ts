@@ -9,7 +9,15 @@ import { render } from 'ink';
 import React from 'react';
 import type { DeepSeekClient } from './adapters/DeepSeekClient.js';
 import type { Message } from './adapters/messages.js';
-import type { StreamEvent } from './adapters/streamEvent.js';
+import {
+  type StreamEvent,
+  isContentDelta,
+  isError,
+  isGermination,
+  isReasoningDelta,
+  isToolCall,
+  isToolResult,
+} from './adapters/streamEvent.js';
 import { V3Adapter } from './adapters/v3/adapter.js';
 import { V4Adapter } from './adapters/v4/adapter.js';
 import { ConversationLog } from './memory/conversationLog.js';
@@ -193,13 +201,17 @@ async function main(): Promise<void> {
       // exactOptionalPropertyTypes: conditional spread so the key is absent when not set.
       ...(initialHistory ? { initialHistory } : {}),
       onState: (ev: StreamEvent) => {
-        if (ev.type === 'reasoning_delta') {
+        if (isGermination(ev)) {
+          // Phase 19: germination events rendered by UI in a future phase.
+          // For now, log and continue without re-rendering.
+          logger.info({ event: 'germination', spore: ev.spore });
+        } else if (isReasoningDelta(ev)) {
           reasoningText += ev.text;
           rerender({
             ...state,
             reasoning: { text: reasoningText, phase: 'streaming', startedAtMs: reasonStartedAt },
           });
-        } else if (ev.type === 'content_delta') {
+        } else if (isContentDelta(ev)) {
           if (state.reasoning && state.reasoning.phase === 'streaming') {
             rerender({
               ...state,
@@ -208,7 +220,7 @@ async function main(): Promise<void> {
           }
           contentText += ev.text;
           rerender({ ...state, content: contentText });
-        } else if (ev.type === 'tool_call') {
+        } else if (isToolCall(ev)) {
           logger.info({ event: 'tool_call', name: ev.name, id: ev.id });
           rerender({
             ...state,
@@ -217,7 +229,7 @@ async function main(): Promise<void> {
               { id: ev.id, name: ev.name, args: ev.args, status: 'running' },
             ],
           });
-        } else if (ev.type === 'tool_result') {
+        } else if (isToolResult(ev)) {
           logger.info({
             event: 'tool_result',
             id: ev.id,
@@ -240,7 +252,7 @@ async function main(): Promise<void> {
                 : c,
             ),
           });
-        } else if (ev.type === 'turn_complete') {
+        } else if ('type' in ev && ev.type === 'turn_complete') {
           // F4 reset: clear per-turn reasoning + content buffers so turn N's
           // content does not concatenate onto turn N-1's. Phase 13 review M1:
           // do NOT clear `toolCalls` here. `runReactLoop` yields `turn_complete`
@@ -266,7 +278,7 @@ async function main(): Promise<void> {
           contentText = '';
           reasonStartedAt = Date.now();
           rerender({ ...state, reasoning: null, content: '' });
-        } else if (ev.type === 'error') {
+        } else if (isError(ev)) {
           logger.error({
             event: 'stream_error',
             message: ev.cause instanceof Error ? ev.cause.message : String(ev.cause),

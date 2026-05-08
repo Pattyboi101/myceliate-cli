@@ -5,12 +5,26 @@ export type Usage = {
   cacheHitTokens?: number;
 };
 
+/**
+ * Emitted by `germinate_spore` when a sector spore is activated.
+ * Flows through the orchestrator's event stream so the UI can
+ * render a "Germinating <spore>" notification and update the accent colour.
+ * Uses `kind` (not `type`) to distinguish from API-sourced events.
+ */
+export interface GerminationEvent {
+  kind: 'germination';
+  spore: string;
+  accent_color: string;
+  message: string;
+}
+
 export type StreamEvent =
-  | { type: 'reasoning_delta'; text: string }
   | { type: 'content_delta'; text: string }
-  | { type: 'tool_call'; id: string; name: string; args: unknown }
   | { type: 'done'; usage: Usage }
   | { type: 'error'; cause: unknown }
+  | GerminationEvent
+  | { type: 'reasoning_delta'; text: string }
+  | { type: 'tool_call'; id: string; name: string; args: unknown }
   /**
    * Synthetic boundary marker yielded by `runReactLoop` between iterations of a
    * multi-turn ReAct loop (the previous turn ended with tool_calls; the next
@@ -44,17 +58,21 @@ export type StreamEvent =
       cause?: unknown;
     };
 
+export const isGermination = (e: StreamEvent): e is GerminationEvent =>
+  'kind' in e && e.kind === 'germination';
 export const isReasoningDelta = (
   e: StreamEvent,
-): e is Extract<StreamEvent, { type: 'reasoning_delta' }> => e.type === 'reasoning_delta';
+): e is Extract<StreamEvent, { type: 'reasoning_delta' }> =>
+  'type' in e && e.type === 'reasoning_delta';
 export const isContentDelta = (
   e: StreamEvent,
-): e is Extract<StreamEvent, { type: 'content_delta' }> => e.type === 'content_delta';
+): e is Extract<StreamEvent, { type: 'content_delta' }> =>
+  'type' in e && e.type === 'content_delta';
 export const isToolCall = (e: StreamEvent): e is Extract<StreamEvent, { type: 'tool_call' }> =>
-  e.type === 'tool_call';
+  'type' in e && e.type === 'tool_call';
 export const isDone = (e: StreamEvent): e is Extract<StreamEvent, { type: 'done' }> =>
-  e.type === 'done';
+  'type' in e && e.type === 'done';
 export const isError = (e: StreamEvent): e is Extract<StreamEvent, { type: 'error' }> =>
-  e.type === 'error';
+  'type' in e && e.type === 'error';
 export const isToolResult = (e: StreamEvent): e is Extract<StreamEvent, { type: 'tool_result' }> =>
-  e.type === 'tool_result';
+  'type' in e && e.type === 'tool_result';

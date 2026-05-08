@@ -1,0 +1,14 @@
+name: solo-business
+description: |
+  Sector pack for solo founders. Personas for executive thinking, outreach,
+  marketing, copywriting, pricing, ops, and customer success.
+version: 1.0.0
+accent_color: "#c5a45f"
+keywords:
+  - business
+  - startup
+  - founder
+  - solo
+agents:
+  - ceo
+  - outreach

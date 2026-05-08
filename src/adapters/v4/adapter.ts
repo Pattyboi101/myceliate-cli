@@ -3,7 +3,7 @@ import { openSseConnection, parseSseStream } from '../../transport/sseClient.js'
 import type { FetchInit } from '../../transport/sseClient.js';
 import type { ChatRequest, DeepSeekClient } from '../DeepSeekClient.js';
 import type { Message } from '../messages.js';
-import type { StreamEvent } from '../streamEvent.js';
+import { type StreamEvent, isContentDelta } from '../streamEvent.js';
 import { DsmlParser, escapeXml } from './dsmlParser.js';
 
 type SseOpener = (init: FetchInit) => Promise<AsyncIterable<Uint8Array>>;
@@ -173,7 +173,7 @@ export class V4Adapter implements DeepSeekClient {
           // through to raw passthrough as the previous stateless
           // detectLeakedDsml call did.
           for (const e of dsmlReasoning.feed(delta.reasoning_content)) {
-            if (e.type === 'content_delta') yield { type: 'reasoning_delta', text: e.text };
+            if (isContentDelta(e)) yield { type: 'reasoning_delta', text: e.text };
             else yield e; // tool_call passes through
           }
         }
@@ -191,7 +191,7 @@ export class V4Adapter implements DeepSeekClient {
           for (const e of dsml.flush()) yield e;
           // F6: drain the reasoning channel symmetrically.
           for (const e of dsmlReasoning.flush()) {
-            if (e.type === 'content_delta') yield { type: 'reasoning_delta', text: e.text };
+            if (isContentDelta(e)) yield { type: 'reasoning_delta', text: e.text };
             else yield e;
           }
           const u = chunk.usage;

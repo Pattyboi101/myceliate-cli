@@ -1,7 +1,7 @@
 // src/orchestrator/reactLoop.ts
 import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { ToolCall } from '../adapters/messages.js';
-import type { StreamEvent } from '../adapters/streamEvent.js';
+import { type StreamEvent, isGermination } from '../adapters/streamEvent.js';
 import type { MarkdownStore } from '../memory/markdownStore.js';
 import { redactSecrets } from '../security/redactor.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -47,6 +47,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
 
     for await (const ev of opts.client.stream(request)) {
       yield ev;
+      if (isGermination(ev)) continue;
       switch (ev.type) {
         case 'reasoning_delta':
           assistantReasoning += ev.text;

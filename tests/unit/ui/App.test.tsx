@@ -14,6 +14,7 @@ it('renders <PromptInput> when phase is awaiting_input', () => {
     phase: 'awaiting_input',
     turns: [],
     toolCalls: [],
+    activeSpore: null,
   };
   const { lastFrame } = render(<App state={state} />);
   // PromptInput renders the gray block-cursor glyph as its visible marker.
@@ -29,6 +30,7 @@ it('hides <PromptInput> while streaming', () => {
     phase: 'streaming',
     turns: [],
     toolCalls: [],
+    activeSpore: null,
   };
   const { lastFrame } = render(<App state={state} />);
   expect(lastFrame()).not.toContain('▎');
@@ -44,6 +46,7 @@ describe('App', () => {
       phase: 'streaming',
       turns: [],
       toolCalls: [],
+      activeSpore: null,
     };
     const { lastFrame } = render(<App state={state} />);
     const f = lastFrame() ?? '';
@@ -60,6 +63,7 @@ describe('App', () => {
       phase: 'streaming',
       turns: [],
       toolCalls: [],
+      activeSpore: null,
     };
     const { lastFrame } = render(<App state={state} />);
     expect(lastFrame()).toContain('Approval required');
@@ -78,6 +82,7 @@ describe('App', () => {
       phase: 'streaming',
       turns: [],
       toolCalls: [],
+      activeSpore: null,
     };
     const { lastFrame, stdin } = render(<App state={state} />);
     // Wait for Ink's useEffect to register the 'readable' listener via setRawMode.
@@ -109,6 +114,7 @@ describe('App', () => {
       phase: 'streaming',
       turns: [],
       toolCalls: [],
+      activeSpore: null,
     };
     const { lastFrame, rerender } = render(<App state={state} />);
     const f1 = lastFrame() ?? '';
@@ -133,6 +139,7 @@ describe('App', () => {
       phase: 'streaming',
       turns: [],
       toolCalls: [],
+      activeSpore: null,
     };
     const { lastFrame } = render(<App state={state} />);
     const frame = lastFrame() ?? '';
@@ -160,6 +167,7 @@ it('renders ToolCallCard for each entry in state.toolCalls', () => {
     phase: 'streaming',
     turns: [],
     toolCalls: [toolCall],
+    activeSpore: null,
   };
   const { lastFrame } = render(<App state={state} />);
   expect(lastFrame()).toContain('bash');
@@ -185,6 +193,7 @@ it('expands the most recent ToolCallCard when Tab is pressed (after reasoning to
         preview: Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n'),
       },
     ],
+    activeSpore: null,
   };
   const { stdin, lastFrame } = render(<App state={state} />);
   await new Promise((r) => setTimeout(r, 50));

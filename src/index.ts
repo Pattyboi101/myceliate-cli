@@ -9,23 +9,42 @@ import { render } from 'ink';
 import React from 'react';
 import type { DeepSeekClient } from './adapters/DeepSeekClient.js';
 import type { Message } from './adapters/messages.js';
-import type { StreamEvent } from './adapters/streamEvent.js';
+import {
+  type StreamEvent,
+  isContentDelta,
+  isError,
+  isGermination,
+  isReasoningDelta,
+  isToolCall,
+  isToolResult,
+  isTurnComplete,
+} from './adapters/streamEvent.js';
 import { V3Adapter } from './adapters/v3/adapter.js';
 import { V4Adapter } from './adapters/v4/adapter.js';
 import { ConversationLog } from './memory/conversationLog.js';
 import { MarkdownStore } from './memory/markdownStore.js';
+import type { QueryEngine } from './orchestrator/QueryEngine.js';
 import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
 import { runReplSession } from './runtime/replSession.js';
-import { buildTurnsFromHistory, isSafeToResume, parseResumeFlag } from './runtime/resume.js';
+import {
+  buildTurnsFromHistory,
+  isSafeToResume,
+  parseNoSporeFlag,
+  parseResumeFlag,
+} from './runtime/resume.js';
 import { startWorker } from './runtime/workerLifecycle.js';
 import { type ApprovalRequest, type ApprovalResponse, HitlGate } from './security/hitlGate.js';
+import { bootSpores } from './spores/bootSpores.js';
+import { childProcessSpawn } from './spores/childProcessSpawn.js';
 import { createBashTool } from './tools/bash.js';
+import { createGerminateSporeTool } from './tools/germinate_spore.js';
 import { grepTool } from './tools/grep.js';
 import { listDirTool } from './tools/listDir.js';
 import { readFileTool } from './tools/readFile.js';
 import { ToolRegistry } from './tools/registry.js';
+import { createSpawnSubagentTool } from './tools/spawn_subagent.js';
 import { writeFileTool } from './tools/writeFile.js';
 import { App, type AppState, type CompletedTurn } from './ui/App.js';
 import { runOnboarding } from './ui/onboarding.js';
@@ -43,6 +62,8 @@ async function main(): Promise<void> {
   // Phase 18: parse --resume before heavy initialisation so we can exit early
   // on an invalid flag without spinning up Redis, Ink, etc.
   const resumeId = parseResumeFlag(process.argv.slice(2));
+  // Phase 19: --no-spore opts out of sector-pack loading.
+  const noSpore = parseNoSporeFlag(process.argv.slice(2));
 
   const ctx = await senseContext({ cwd: process.cwd() });
   const sessionId = resumeId ?? randomUUID();
@@ -81,6 +102,12 @@ async function main(): Promise<void> {
     initialTurns = buildTurnsFromHistory(rehydrated);
   }
 
+  // Phase 19: boot sector spores (unless --no-spore).
+  const cwd = process.cwd();
+  const spores = await bootSpores(cwd, noSpore);
+  let activeSpore = spores.activeSpore;
+  let engineRef: QueryEngine | null = null;
+
   const baseUrl = process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com';
   const client: DeepSeekClient =
     onboarding.adapter === 'v3'
@@ -95,6 +122,13 @@ async function main(): Promise<void> {
   // start Patrick wanted.
   // Phase 18: on --resume, populate turns with prior context and drop straight
   // into `awaiting_input` with the rehydrated history visible.
+  const activeName = spores.activeSpore;
+  const activeSporeRecord = activeName ? spores.registry.get(activeName) : undefined;
+  let uiActiveSpore: { name: string; accent_color: string } | null =
+    activeName && activeSporeRecord
+      ? { name: activeName, accent_color: activeSporeRecord.manifest.accent_color }
+      : null;
+
   let state: AppState = {
     userInput: '',
     reasoning: null,
@@ -103,6 +137,7 @@ async function main(): Promise<void> {
     phase: 'awaiting_input',
     turns: initialTurns,
     toolCalls: [],
+    activeSpore: uiActiveSpore,
   };
   const banner = {
     model: onboarding.model,
@@ -168,6 +203,53 @@ async function main(): Promise<void> {
   tools.register(grepTool);
   tools.register(createBashTool({ hitl, queue, queueEvents, defaultTimeoutMs: 30_000 }));
 
+  // Phase 19: register spore coordination tools (R9 — coordination capability).
+  // appendSystemPrompt calls appendSystemSection on the live QueryEngine so
+  // runtime germination is visible to the model from the very next API call.
+  const germinateTool = createGerminateSporeTool({
+    registry: spores.registry,
+    cwd,
+    emit: (ev) => {
+      if (isGermination(ev)) {
+        uiActiveSpore = { name: ev.spore, accent_color: ev.accent_color };
+        rerender({ ...state, activeSpore: uiActiveSpore });
+        logger.info({ event: 'germination', spore: ev.spore });
+      }
+    },
+    appendSystemPrompt: (section) => {
+      engineRef?.appendSystemSection(section);
+    },
+  });
+  // Wrap germinate_spore to fit ToolRegistry's Tool<Input> interface.
+  tools.register({
+    name: 'germinate_spore',
+    description: germinateTool.description,
+    capability: 'coordination' as const,
+    inputSchema: germinateTool.inputSchema,
+    run: async (input, _ctx) => {
+      const result = await germinateTool.handler(input);
+      if (result.ok) activeSpore = result.spore;
+      return JSON.stringify(result);
+    },
+  });
+
+  const spawnTool = createSpawnSubagentTool({
+    registry: spores.registry,
+    activeSpore: () => activeSpore,
+    spawn: (req) => childProcessSpawn(req),
+  });
+  // Wrap spawn_subagent to fit ToolRegistry's Tool<Input> interface.
+  tools.register({
+    name: 'spawn_subagent',
+    description: spawnTool.description,
+    capability: 'coordination' as const,
+    inputSchema: spawnTool.inputSchema,
+    run: async (input, _ctx) => {
+      const result = await spawnTool.handler(input);
+      return JSON.stringify(result);
+    },
+  });
+
   // Per-turn streaming buffers (reset on each `turn_complete` and at the top of
   // every REPL iteration via the runReplSession `onState` callback below).
   let reasonStartedAt = Date.now();
@@ -182,24 +264,33 @@ async function main(): Promise<void> {
   // snapshot.slice(0) and re-append every rehydrated message, duplicating the log.
   let lastSnapshotLen = initialHistory?.length ?? 0;
 
+  const descs = spores.registry.getDescriptions();
+  const descriptionsSection =
+    descs.length > 0
+      ? `\n\n## Available sector spores\n\nIf the user's intent aligns with one of these sectors, you MUST call the \`germinate_spore({ name })\` tool immediately — before answering — to load that sector's persona roster into context. Skip germination only when the request is genuinely off-sector or trivially conversational ("what's 2+2", "hi"). Don't try to answer in-sector questions from base weights when the right spore is right there.\n\n${descs.map((d) => `- \`${d.name}\` (${d.accent_color}): ${d.description}`).join('\n')}\n`
+      : '';
+
   try {
     await runReplSession({
       client,
       tools,
       model: onboarding.model,
       cwd: process.cwd(),
-      systemPrompt: buildSystemPrompt(ctx),
+      systemPrompt: buildSystemPrompt(ctx) + spores.germinatedSection + descriptionsSection,
       workingBudget: Number(process.env.WORKING_TOKEN_BUDGET ?? 200_000),
       // exactOptionalPropertyTypes: conditional spread so the key is absent when not set.
       ...(initialHistory ? { initialHistory } : {}),
+      onEngineReady: (engine) => {
+        engineRef = engine;
+      },
       onState: (ev: StreamEvent) => {
-        if (ev.type === 'reasoning_delta') {
+        if (isReasoningDelta(ev)) {
           reasoningText += ev.text;
           rerender({
             ...state,
             reasoning: { text: reasoningText, phase: 'streaming', startedAtMs: reasonStartedAt },
           });
-        } else if (ev.type === 'content_delta') {
+        } else if (isContentDelta(ev)) {
           if (state.reasoning && state.reasoning.phase === 'streaming') {
             rerender({
               ...state,
@@ -208,7 +299,7 @@ async function main(): Promise<void> {
           }
           contentText += ev.text;
           rerender({ ...state, content: contentText });
-        } else if (ev.type === 'tool_call') {
+        } else if (isToolCall(ev)) {
           logger.info({ event: 'tool_call', name: ev.name, id: ev.id });
           rerender({
             ...state,
@@ -217,7 +308,7 @@ async function main(): Promise<void> {
               { id: ev.id, name: ev.name, args: ev.args, status: 'running' },
             ],
           });
-        } else if (ev.type === 'tool_result') {
+        } else if (isToolResult(ev)) {
           logger.info({
             event: 'tool_result',
             id: ev.id,
@@ -240,7 +331,7 @@ async function main(): Promise<void> {
                 : c,
             ),
           });
-        } else if (ev.type === 'turn_complete') {
+        } else if (isTurnComplete(ev)) {
           // F4 reset: clear per-turn reasoning + content buffers so turn N's
           // content does not concatenate onto turn N-1's. Phase 13 review M1:
           // do NOT clear `toolCalls` here. `runReactLoop` yields `turn_complete`
@@ -266,7 +357,7 @@ async function main(): Promise<void> {
           contentText = '';
           reasonStartedAt = Date.now();
           rerender({ ...state, reasoning: null, content: '' });
-        } else if (ev.type === 'error') {
+        } else if (isError(ev)) {
           logger.error({
             event: 'stream_error',
             message: ev.cause instanceof Error ? ev.cause.message : String(ev.cause),
@@ -294,6 +385,7 @@ async function main(): Promise<void> {
           phase: 'awaiting_input',
           turns,
           toolCalls: [],
+          activeSpore: uiActiveSpore,
         });
       },
       readNextPrompt: async () =>
@@ -308,6 +400,7 @@ async function main(): Promise<void> {
             phase: 'streaming',
             turns: state.turns,
             toolCalls: [],
+            activeSpore: uiActiveSpore,
           });
           return text;
         }),

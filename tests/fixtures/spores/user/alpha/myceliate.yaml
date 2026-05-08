@@ -1,0 +1,6 @@
+name: alpha
+description: User alpha.
+version: 1.0.0
+accent_color: "#222222"
+agents:
+  - y

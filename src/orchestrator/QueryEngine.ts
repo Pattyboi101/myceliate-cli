@@ -33,8 +33,13 @@ export type CompactionRefusal = Error & { kind: 'compaction_refused' };
 export class QueryEngine {
   private readonly history: Message[] = [];
   private readonly checker: BudgetChecker;
-  private readonly system: Message;
-  private readonly opts: Required<Omit<QueryEngineOptions, 'thresholds' | 'initialHistory'>> & {
+  private systemSections: string[];
+  // `systemPrompt` lives in `systemSections` (mutable, so runtime germination
+  // can append). It's intentionally NOT stored in `opts` to avoid a second
+  // copy that would silently diverge.
+  private readonly opts: Required<
+    Omit<QueryEngineOptions, 'thresholds' | 'initialHistory' | 'systemPrompt'>
+  > & {
     thresholds: BudgetThresholds;
   };
 
@@ -45,18 +50,22 @@ export class QueryEngine {
       ...opts.thresholds,
     };
     this.opts = {
-      systemPrompt: opts.systemPrompt,
       workingBudget: opts.workingBudget,
       protectedTailMessages: opts.protectedTailMessages ?? 6,
       protectedTailTokens: opts.protectedTailTokens ?? 40_000,
       maxToolOutputChars: opts.maxToolOutputChars ?? 80_000,
       thresholds,
     };
-    this.system = { role: 'system', content: opts.systemPrompt };
+    this.systemSections = [opts.systemPrompt];
     this.checker = new BudgetChecker(thresholds);
     if (opts.initialHistory) {
       for (const m of opts.initialHistory) this.history.push(m);
     }
+  }
+
+  /** Append a section to the system prompt. New sections show up in the next prepareRequest call. */
+  appendSystemSection(section: string): void {
+    this.systemSections.push(section);
   }
 
   appendUser(content: string): void {
@@ -119,7 +128,8 @@ export class QueryEngine {
       }
     }
 
-    const messages: Message[] = [this.system, ...this.applyR2(working)];
+    const system: Message = { role: 'system', content: this.systemSections.join('') };
+    const messages: Message[] = [system, ...this.applyR2(working)];
     return {
       model: args.model,
       messages,

@@ -21,6 +21,8 @@ export type ReplSessionOptions = {
   onTurnComplete: (history: readonly Message[]) => void | Promise<void>;
   /** Resolves with the next user prompt (or "/quit" / empty to exit). */
   readNextPrompt: () => Promise<string>;
+  /** Fires once after the QueryEngine is constructed. Use to register dynamic system-prompt mutators. */
+  onEngineReady?: (engine: QueryEngine) => void;
 };
 
 // Phase 12 review m2 fix: `''` removed from QUIT_TOKENS so an accidental empty
@@ -35,6 +37,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
     // exactOptionalPropertyTypes: conditional spread so the key is absent when not provided.
     ...(opts.initialHistory ? { initialHistory: opts.initialHistory } : {}),
   });
+  opts.onEngineReady?.(engine);
 
   while (true) {
     const prompt = (await opts.readNextPrompt()).trim();

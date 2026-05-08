@@ -104,3 +104,12 @@ export function buildTurnsFromHistory(history: readonly Message[]): CompletedTur
   }
   return turns;
 }
+
+/**
+ * Parse --no-spore from argv. Returns true if the flag is present, false otherwise.
+ * When true, the orchestrator boots without loading any spores — useful for testing
+ * or when the user explicitly wants a clean session without sector packs.
+ */
+export function parseNoSporeFlag(argv: readonly string[]): boolean {
+  return argv.includes('--no-spore');
+}

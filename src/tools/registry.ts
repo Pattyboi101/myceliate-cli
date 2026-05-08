@@ -1,4 +1,3 @@
-// src/tools/registry.ts
 import type { z } from 'zod';
 import type { ToolDefinition } from '../adapters/DeepSeekClient.js';
 import { zodToStrictJsonSchema } from './schema.js';

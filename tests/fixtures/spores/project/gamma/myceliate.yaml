@@ -1,0 +1,6 @@
+name: gamma
+description: Project gamma.
+version: 1.0.0
+accent_color: "#555555"
+agents:
+  - v

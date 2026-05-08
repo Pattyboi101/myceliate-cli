@@ -32,7 +32,9 @@ export type ReplSessionOptions = {
   sporeRegistry?: SporeRegistry;
   /**
    * Phase 21: fires when a slash command produces output (e.g. /spore list).
-   * Consumer renders it to the UI. Omitting falls back to console.log.
+   * Consumer renders it to the UI. Omitting silently drops the output —
+   * NEVER falls back to console.log because U4 forbids stdout writes while
+   * Ink is mounted (ANSI corruption). Production callers always provide it.
    */
   onSlashOutput?: (text: string) => void;
   /**
@@ -56,7 +58,9 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
   });
   opts.onEngineReady?.(engine);
 
-  const emitSlash = opts.onSlashOutput ?? ((t) => console.log(t));
+  // Silent no-op fallback — see ReplSessionOptions.onSlashOutput JSDoc for
+  // the U4 reasoning. Production paths always provide a real handler.
+  const emitSlash = opts.onSlashOutput ?? ((_t: string) => {});
 
   while (true) {
     const prompt = (await opts.readNextPrompt()).trim();

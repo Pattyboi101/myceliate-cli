@@ -305,7 +305,10 @@ async function main(): Promise<void> {
             activeSpore = name;
           }
         }
-        rerender({ ...state, activeSpore: uiActiveSpore });
+        // Clear any visible germination card on slash-driven spore changes —
+        // the card is for tool-call germination events; manual /spore pin/unpin
+        // bypasses that path and shouldn't leave a stale card on screen.
+        rerender({ ...state, activeSpore: uiActiveSpore, germinationCard: null });
       },
       onState: (ev: StreamEvent) => {
         if (isReasoningDelta(ev)) {

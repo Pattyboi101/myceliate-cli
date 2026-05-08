@@ -6,9 +6,11 @@ import type { ApprovalRequest, ApprovalResponse } from '../security/hitlGate.js'
 import { ApprovalPrompt } from './ApprovalPrompt.js';
 import { Banner, type BannerInfo } from './Banner.js';
 import { ContentStream } from './ContentStream.js';
-import { PromptInput } from './PromptInput.js';
+import { GerminationCard } from './GerminationCard.js';
+import { InputBox } from './InputBox.js';
 import { ReasoningBlock } from './ReasoningBlock.js';
 import { ToolCallCard, type ToolCallCardState } from './ToolCallCard.js';
+import type { ActiveSporeState } from './store.js';
 
 export type ReasoningState = {
   text: string;
@@ -45,11 +47,15 @@ export type AppState = {
   toolCalls: ToolCallCardState[];
   /**
    * Phase 19: active sector spore for UI state (border color, etc.).
-   * Set when germinate_spore fires a GerminationEvent. Phase 21 will
-   * wire this to <InputBox> borderColor. Data flow established here so
-   * the plumbing exists when Phase 21 needs it.
+   * Phase 21: wired to <InputBox> borderColor. Uses ActiveSporeState from store.ts.
    */
-  activeSpore: { name: string; accent_color: string } | null;
+  activeSpore: ActiveSporeState | null;
+  /**
+   * Phase 21: last germination event data for rendering <GerminationCard>
+   * inline in the stream. Cleared on turn_complete. Optional so existing
+   * fixtures without this field continue to pass (treats undefined as null).
+   */
+  germinationCard?: ActiveSporeState | null;
 };
 
 export function App({
@@ -123,6 +129,14 @@ export function App({
               expanded={cardExpanded && i === state.toolCalls.length - 1}
             />
           ))}
+          {/* Phase 21: show GerminationCard inline when a germination event arrived this turn */}
+          {state.germinationCard && (
+            <GerminationCard
+              spore={state.germinationCard.name}
+              accent_color={state.germinationCard.accent_color}
+              message={`Germinating ${state.germinationCard.name} spore`}
+            />
+          )}
           {state.content.length > 0 && <ContentStream text={state.content} />}
         </>
       )}
@@ -131,7 +145,10 @@ export function App({
         if (!head) return null;
         return <ApprovalPrompt request={head} onResponse={onApprovalResponse ?? (() => {})} />;
       })()}
-      {state.phase === 'awaiting_input' && <PromptInput onSubmit={onPromptSubmit ?? (() => {})} />}
+      {/* Phase 21: InputBox with dynamic border colour replaces PromptInput */}
+      {state.phase === 'awaiting_input' && (
+        <InputBox activeSpore={state.activeSpore} onSubmit={onPromptSubmit ?? (() => {})} />
+      )}
     </Box>
   );
 }

@@ -138,6 +138,7 @@ async function main(): Promise<void> {
     turns: initialTurns,
     toolCalls: [],
     activeSpore: uiActiveSpore,
+    germinationCard: null,
   };
   const banner = {
     model: onboarding.model,
@@ -212,7 +213,8 @@ async function main(): Promise<void> {
     emit: (ev) => {
       if (isGermination(ev)) {
         uiActiveSpore = { name: ev.spore, accent_color: ev.accent_color };
-        rerender({ ...state, activeSpore: uiActiveSpore });
+        // Phase 21: set germinationCard so <GerminationCard> renders in-stream.
+        rerender({ ...state, activeSpore: uiActiveSpore, germinationCard: uiActiveSpore });
         logger.info({ event: 'germination', spore: ev.spore });
       }
     },
@@ -386,6 +388,7 @@ async function main(): Promise<void> {
           turns,
           toolCalls: [],
           activeSpore: uiActiveSpore,
+          germinationCard: null,
         });
       },
       readNextPrompt: async () =>
@@ -401,6 +404,7 @@ async function main(): Promise<void> {
             turns: state.turns,
             toolCalls: [],
             activeSpore: uiActiveSpore,
+            germinationCard: null,
           });
           return text;
         }),

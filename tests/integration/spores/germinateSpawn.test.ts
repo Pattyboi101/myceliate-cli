@@ -96,6 +96,77 @@ describe('integration: germinate -> spawn end-to-end', () => {
     );
   });
 
+  it('stretch: double germination with replaceGerminatedSection only keeps the second body', async () => {
+    const registry = await SporeRegistry.discover({
+      bundledDir,
+      userDir: '/none',
+      projectDir: '/none',
+    });
+
+    // Build a second spore fixture in the same bundledDir
+    const dir2 = join(bundledDir, 'biz2');
+    await mkdir(join(dir2, 'agents', 'analyst'), { recursive: true });
+    await writeFile(
+      join(dir2, 'SKILL.md'),
+      '---\nname: biz2\ndescription: Test biz2 spore.\n---\nBiz2 body.\n',
+      'utf8',
+    );
+    await writeFile(
+      join(dir2, 'myceliate.yaml'),
+      'name: biz2\ndescription: biz2 pack\nversion: 1.0.0\naccent_color: "#5fb8b8"\nagents:\n  - analyst\n',
+      'utf8',
+    );
+    await writeFile(
+      join(dir2, 'agents', 'analyst', 'SKILL.md'),
+      '---\nname: analyst\ndescription: Test analyst.\n---\nYou are the analyst.\n',
+      'utf8',
+    );
+
+    // Re-discover to pick up biz2
+    const registry2 = await SporeRegistry.discover({
+      bundledDir,
+      userDir: '/none',
+      projectDir: '/none',
+    });
+
+    const engine = new QueryEngine({
+      systemPrompt: 'Base system prompt.',
+      workingBudget: 200_000,
+    });
+
+    const germinate = createGerminateSporeTool({
+      registry: registry2,
+      cwd,
+      emit: () => {},
+      appendSystemPrompt: (section) => engine.replaceGerminatedSection(section),
+    });
+
+    // Germinate biz first
+    const r1 = await germinate.handler({ name: 'biz' });
+    expect(r1.ok).toBe(true);
+
+    // Germinate biz2 second — should replace, not stack
+    const r2 = await germinate.handler({ name: 'biz2' });
+    expect(r2.ok).toBe(true);
+
+    const req = engine.prepareRequest({
+      model: 'test-model',
+      tools: [],
+      thinking: false,
+      strict: false,
+    });
+
+    const sysMsg = req.messages[0];
+    expect(sysMsg?.role).toBe('system');
+    if (sysMsg && 'content' in sysMsg && typeof sysMsg.content === 'string') {
+      // Only the second spore body should be present
+      expect(sysMsg.content).toContain('Biz2 body');
+      expect(sysMsg.content).not.toContain('Biz body');
+      // Base prompt is preserved
+      expect(sysMsg.content).toContain('Base system prompt.');
+    }
+  });
+
   it('C1 regression: QueryEngine.appendSystemSection propagates germinated body into next prepareRequest', async () => {
     const registry = await SporeRegistry.discover({
       bundledDir,

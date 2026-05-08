@@ -1,0 +1,11 @@
+name: example-spore
+description: |
+  A starter template for authoring your own spore.
+  Replace this description with your sector's purpose.
+version: 1.0.0
+accent_color: "#888888"
+keywords:
+  - example
+  - replace-me
+agents:
+  - example

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { App, type AppState } from '../../../src/ui/App.js';
 import type { ToolCallCardState } from '../../../src/ui/ToolCallCard.js';
 
-it('renders <PromptInput> when phase is awaiting_input', () => {
+it('renders <InputBox> when phase is awaiting_input', () => {
   const state: AppState = {
     userInput: '',
     reasoning: null,
@@ -17,11 +17,11 @@ it('renders <PromptInput> when phase is awaiting_input', () => {
     activeSpore: null,
   };
   const { lastFrame } = render(<App state={state} />);
-  // PromptInput renders the gray block-cursor glyph as its visible marker.
+  // InputBox renders the gray block-cursor glyph as its visible marker.
   expect(lastFrame()).toContain('▎');
 });
 
-it('hides <PromptInput> while streaming', () => {
+it('hides <InputBox> while streaming', () => {
   const state: AppState = {
     userInput: 'hi',
     reasoning: null,

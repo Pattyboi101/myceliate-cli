@@ -138,6 +138,7 @@ async function main(): Promise<void> {
     turns: initialTurns,
     toolCalls: [],
     activeSpore: uiActiveSpore,
+    germinationCard: null,
   };
   const banner = {
     model: onboarding.model,
@@ -212,12 +213,15 @@ async function main(): Promise<void> {
     emit: (ev) => {
       if (isGermination(ev)) {
         uiActiveSpore = { name: ev.spore, accent_color: ev.accent_color };
-        rerender({ ...state, activeSpore: uiActiveSpore });
+        // Phase 21: set germinationCard so <GerminationCard> renders in-stream.
+        rerender({ ...state, activeSpore: uiActiveSpore, germinationCard: uiActiveSpore });
         logger.info({ event: 'germination', spore: ev.spore });
       }
     },
     appendSystemPrompt: (section) => {
-      engineRef?.appendSystemSection(section);
+      // Phase 21 stretch: replaceGerminatedSection drops any prior germinated body
+      // before pushing the new one, preventing double-sector-context stacking.
+      engineRef?.replaceGerminatedSection(section);
     },
   });
   // Wrap germinate_spore to fit ToolRegistry's Tool<Input> interface.
@@ -282,6 +286,29 @@ async function main(): Promise<void> {
       ...(initialHistory ? { initialHistory } : {}),
       onEngineReady: (engine) => {
         engineRef = engine;
+      },
+      sporeRegistry: spores.registry,
+      onSlashOutput: (text) => {
+        // Phase 21: render slash command output as a completed turn (no streaming).
+        const newTurn: CompletedTurn = { userInput: '', content: text };
+        rerender({ ...state, turns: [...state.turns, newTurn] });
+      },
+      onActiveSporeChange: (name) => {
+        // Phase 21: /spore pin or /spore unpin changed the active spore.
+        if (name === null) {
+          uiActiveSpore = null;
+          activeSpore = null;
+        } else {
+          const rec = spores.registry.get(name);
+          if (rec) {
+            uiActiveSpore = { name, accent_color: rec.manifest.accent_color };
+            activeSpore = name;
+          }
+        }
+        // Clear any visible germination card on slash-driven spore changes —
+        // the card is for tool-call germination events; manual /spore pin/unpin
+        // bypasses that path and shouldn't leave a stale card on screen.
+        rerender({ ...state, activeSpore: uiActiveSpore, germinationCard: null });
       },
       onState: (ev: StreamEvent) => {
         if (isReasoningDelta(ev)) {
@@ -386,6 +413,7 @@ async function main(): Promise<void> {
           turns,
           toolCalls: [],
           activeSpore: uiActiveSpore,
+          germinationCard: null,
         });
       },
       readNextPrompt: async () =>
@@ -401,6 +429,7 @@ async function main(): Promise<void> {
             turns: state.turns,
             toolCalls: [],
             activeSpore: uiActiveSpore,
+            germinationCard: null,
           });
           return text;
         }),

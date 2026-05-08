@@ -1,0 +1,6 @@
+name: alpha
+description: Project alpha.
+version: 1.0.0
+accent_color: "#444444"
+agents:
+  - w

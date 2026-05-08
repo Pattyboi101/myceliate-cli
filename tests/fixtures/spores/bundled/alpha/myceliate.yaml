@@ -1,0 +1,6 @@
+name: alpha
+description: Bundled alpha.
+version: 1.0.0
+accent_color: "#111111"
+agents:
+  - x

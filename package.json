@@ -7,13 +7,7 @@
     "myceliate": "bin/myceliate.mjs"
   },
   "main": "dist/index.js",
-  "files": [
-    "bin",
-    "dist",
-    "src",
-    "README.md",
-    "CLAUDE.md"
-  ],
+  "files": ["bin", "dist", "spores", "src", "README.md", "CLAUDE.md"],
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",

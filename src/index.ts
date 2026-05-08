@@ -3,7 +3,10 @@ import { loadDotenv } from './runtime/dotenv.js';
 loadDotenv();
 
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { QueueEvents } from 'bullmq';
 import { render } from 'ink';
 import React from 'react';
@@ -26,18 +29,73 @@ import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
 import { runReplSession } from './runtime/replSession.js';
-import { buildTurnsFromHistory, isSafeToResume, parseResumeFlag } from './runtime/resume.js';
+import {
+  buildTurnsFromHistory,
+  isSafeToResume,
+  parseNoSporeFlag,
+  parseResumeFlag,
+} from './runtime/resume.js';
 import { startWorker } from './runtime/workerLifecycle.js';
 import { type ApprovalRequest, type ApprovalResponse, HitlGate } from './security/hitlGate.js';
+import { SporeRegistry } from './spores/SporeRegistry.js';
+import { childProcessSpawn } from './spores/childProcessSpawn.js';
+import { readPin } from './spores/pinFile.js';
+import { parseSkillFrontmatter } from './spores/skillFrontmatter.js';
 import { createBashTool } from './tools/bash.js';
+import { createGerminateSporeTool } from './tools/germinate_spore.js';
 import { grepTool } from './tools/grep.js';
 import { listDirTool } from './tools/listDir.js';
 import { readFileTool } from './tools/readFile.js';
 import { ToolRegistry } from './tools/registry.js';
+import { createSpawnSubagentTool } from './tools/spawn_subagent.js';
 import { writeFileTool } from './tools/writeFile.js';
 import { App, type AppState, type CompletedTurn } from './ui/App.js';
 import { runOnboarding } from './ui/onboarding.js';
 import { createLogger } from './util/logger.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+// Bundled spores live at <install-root>/spores/ (one level up from dist/src/)
+const BUNDLED_SPORES_DIR = resolve(HERE, '../spores');
+const USER_SPORES_DIR = resolve(homedir(), '.myceliate', 'skills');
+
+interface SporeBootResult {
+  activeSpore: string | null;
+  registry: SporeRegistry;
+  germinatedSection: string;
+}
+
+async function bootSpores(cwd: string, noSpore: boolean): Promise<SporeBootResult> {
+  const projectSporesDir = resolve(cwd, '.myceliate', 'skills');
+  if (noSpore) {
+    return {
+      activeSpore: null,
+      registry: await SporeRegistry.discover({
+        bundledDir: '/nonexistent',
+        userDir: '/nonexistent',
+        projectDir: '/nonexistent',
+      }),
+      germinatedSection: '',
+    };
+  }
+  const registry = await SporeRegistry.discover({
+    bundledDir: BUNDLED_SPORES_DIR,
+    userDir: USER_SPORES_DIR,
+    projectDir: projectSporesDir,
+  });
+  const pinned = await readPin(cwd);
+  let activeSpore: string | null = null;
+  let germinatedSection = '';
+  if (pinned) {
+    const spore = registry.get(pinned);
+    if (spore) {
+      const sectorRaw = await readFile(spore.sectorSkillPath, 'utf8');
+      const { body } = parseSkillFrontmatter(sectorRaw);
+      germinatedSection = `\n\n<!-- BEGIN GERMINATED SPORE: ${spore.name} -->\n${body.trim()}\n<!-- END GERMINATED SPORE: ${spore.name} -->\n`;
+      activeSpore = spore.name;
+    }
+  }
+  return { activeSpore, registry, germinatedSection };
+}
 
 async function main(): Promise<void> {
   const onboarding = await runOnboarding({
@@ -51,6 +109,8 @@ async function main(): Promise<void> {
   // Phase 18: parse --resume before heavy initialisation so we can exit early
   // on an invalid flag without spinning up Redis, Ink, etc.
   const resumeId = parseResumeFlag(process.argv.slice(2));
+  // Phase 19: --no-spore opts out of sector-pack loading.
+  const noSpore = parseNoSporeFlag(process.argv.slice(2));
 
   const ctx = await senseContext({ cwd: process.cwd() });
   const sessionId = resumeId ?? randomUUID();
@@ -88,6 +148,11 @@ async function main(): Promise<void> {
     // Rebuild AppState.turns from rehydrated history so the UI shows prior context.
     initialTurns = buildTurnsFromHistory(rehydrated);
   }
+
+  // Phase 19: boot sector spores (unless --no-spore).
+  const cwd = process.cwd();
+  const spores = await bootSpores(cwd, noSpore);
+  let activeSpore = spores.activeSpore;
 
   const baseUrl = process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com';
   const client: DeepSeekClient =
@@ -176,6 +241,53 @@ async function main(): Promise<void> {
   tools.register(grepTool);
   tools.register(createBashTool({ hitl, queue, queueEvents, defaultTimeoutMs: 30_000 }));
 
+  // Phase 19: register spore coordination tools (R9 — coordination capability).
+  // appendSystemPrompt mutates a local buffer in Phase 19; the initial pinned
+  // section is already in the system prompt. Full QueryEngine integration for
+  // runtime germination is Phase 20+ scope.
+  let germinatedSectionBuffer = spores.germinatedSection;
+  const germinateTool = createGerminateSporeTool({
+    registry: spores.registry,
+    cwd,
+    emit: (ev) => {
+      // The event will flow through onState below.
+      logger.info({ event: 'germination', spore: 'kind' in ev ? ev.spore : '?' });
+    },
+    appendSystemPrompt: (section) => {
+      germinatedSectionBuffer += section;
+      activeSpore = null; // will be updated by the return value
+    },
+  });
+  // Wrap germinate_spore to fit ToolRegistry's Tool<Input> interface.
+  tools.register({
+    name: 'germinate_spore',
+    description: germinateTool.description,
+    capability: 'coordination' as const,
+    inputSchema: germinateTool.inputSchema,
+    run: async (input, _ctx) => {
+      const result = await germinateTool.handler(input);
+      if (result.ok) activeSpore = result.spore;
+      return JSON.stringify(result);
+    },
+  });
+
+  const spawnTool = createSpawnSubagentTool({
+    registry: spores.registry,
+    activeSpore: () => activeSpore,
+    spawn: (req) => childProcessSpawn(req),
+  });
+  // Wrap spawn_subagent to fit ToolRegistry's Tool<Input> interface.
+  tools.register({
+    name: 'spawn_subagent',
+    description: spawnTool.description,
+    capability: 'coordination' as const,
+    inputSchema: spawnTool.inputSchema,
+    run: async (input, _ctx) => {
+      const result = await spawnTool.handler(input);
+      return JSON.stringify(result);
+    },
+  });
+
   // Per-turn streaming buffers (reset on each `turn_complete` and at the top of
   // every REPL iteration via the runReplSession `onState` callback below).
   let reasonStartedAt = Date.now();
@@ -196,7 +308,7 @@ async function main(): Promise<void> {
       tools,
       model: onboarding.model,
       cwd: process.cwd(),
-      systemPrompt: buildSystemPrompt(ctx),
+      systemPrompt: buildSystemPrompt(ctx) + germinatedSectionBuffer,
       workingBudget: Number(process.env.WORKING_TOKEN_BUDGET ?? 200_000),
       // exactOptionalPropertyTypes: conditional spread so the key is absent when not set.
       ...(initialHistory ? { initialHistory } : {}),

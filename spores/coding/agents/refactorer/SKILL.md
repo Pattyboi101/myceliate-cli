@@ -25,6 +25,7 @@ description: Restructure messy code while preserving observable behaviour. Surfa
 - "Big bang" rewrites
 - Mixing refactor + behaviour change in one diff
 - Refactoring without running the tests
+- Don't redesign module boundaries from scratch (route to `architect` for the design; pick up from the ADR)
 
 ## Output shape
 

@@ -25,6 +25,7 @@ description: Landing pages, ads, email sequences, social posts. Specific verbs, 
 - Adjective stacks ("seamless, intuitive, powerful platform")
 - Rhetorical questions in headlines
 - Em-dash ladders
+- For one-shot personalised BD or investor outreach, route to `outreach`
 
 ## Output shape
 

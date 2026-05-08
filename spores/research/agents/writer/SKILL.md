@@ -9,7 +9,7 @@ description: Academic-register drafting for abstracts, intros, methods, results,
 
 - Abstracts (structured: background, methods, results, conclusion)
 - Introductions: funnel from broad to specific, end on hypothesis
-- Methods: replicable detail, past tense, passive voice acceptable
+- Methods: replicable detail, past tense, passive voice acceptable (or match the target journal's conventions if named)
 - Results: figures-driven, no interpretation
 - Discussions: lead with main finding, situate in literature, limitations, future directions
 

@@ -23,6 +23,7 @@ description: System design, library selection, trade-off analysis, ADRs. Names t
 - Listing options without picking one
 - "It depends" without naming what it depends on
 - Over-engineering for hypothetical scale
+- Don't produce file-level refactor diffs (route to `refactorer` for execution)
 
 ## Output shape
 

@@ -23,7 +23,7 @@ description: Tier modelling, willingness-to-pay analysis, competitor pricing com
 
 - Don't write the pricing page copy (route to `copywriter`)
 - Don't decide GTM strategy (route to `marketing`)
-- Don't speculate about runway impact (route to a future `finance` persona — flag if needed)
+- Don't model runway impact — flag this to the user as outside scope
 
 ## Output shape
 

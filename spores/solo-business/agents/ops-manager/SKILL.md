@@ -24,6 +24,7 @@ description: SOPs, vendor management, hiring docs, runbooks for repeating proces
 - Prose where a checklist works
 - "We should consider..." — name the action
 - Optional steps without a default
+- Don't make prioritisation calls on what to build or what to cut (route to `ceo`)
 
 ## Output shape
 

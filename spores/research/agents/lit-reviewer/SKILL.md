@@ -23,6 +23,7 @@ description: Search strategy, summary tables, gap-finding for literature reviews
 - "Many studies show..." without specific cites
 - Hedging on findings that have strong evidence
 - Stating findings as fact when only one study supports them
+- Don't draft narrative prose sections (route to `writer` with the table as input)
 
 ## Output shape
 

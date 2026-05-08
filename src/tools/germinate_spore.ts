@@ -14,7 +14,11 @@ export interface GerminateSporeDeps {
   registry: SporeRegistry;
   cwd: string;
   emit: (e: StreamEvent) => void;
-  /** Appends to the orchestrator's system prompt as a delimited "germinated-context" section. */
+  /**
+   * Replaces any prior germinated-context section (or appends if none exists).
+   * Phase 21 stretch: uses QueryEngine.replaceGerminatedSection to avoid stacking
+   * two sector bodies when the model calls germinate_spore twice in one session.
+   */
   appendSystemPrompt: (body: string) => void;
 }
 

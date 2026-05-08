@@ -219,7 +219,9 @@ async function main(): Promise<void> {
       }
     },
     appendSystemPrompt: (section) => {
-      engineRef?.appendSystemSection(section);
+      // Phase 21 stretch: replaceGerminatedSection drops any prior germinated body
+      // before pushing the new one, preventing double-sector-context stacking.
+      engineRef?.replaceGerminatedSection(section);
     },
   });
   // Wrap germinate_spore to fit ToolRegistry's Tool<Input> interface.

@@ -68,6 +68,28 @@ export class QueryEngine {
     this.systemSections.push(section);
   }
 
+  /**
+   * Phase 21 stretch: replace any previously-germinated spore section with a new one.
+   *
+   * If the model calls `germinate_spore` twice in one session with different spore
+   * names, `appendSystemSection` would stack both bodies — the model ends up with two
+   * sector contexts. This method drops any section tagged
+   * `<!-- BEGIN GERMINATED SPORE: ... -->` before pushing the new one.
+   *
+   * Falls back to `appendSystemSection` when no germinated section exists yet.
+   */
+  replaceGerminatedSection(section: string): void {
+    const BEGIN = '<!-- BEGIN GERMINATED SPORE:';
+    const END_TAG = '<!-- END GERMINATED SPORE:';
+    // Drop all sections that contain a BEGIN tag (there should only ever be one,
+    // but we clear all to be defensive).
+    const filtered = this.systemSections.filter((s) => !s.includes(BEGIN) && !s.includes(END_TAG));
+    // Replace in-place to preserve array identity for any external references.
+    this.systemSections.length = 0;
+    for (const s of filtered) this.systemSections.push(s);
+    this.systemSections.push(section);
+  }
+
   appendUser(content: string): void {
     this.history.push({ role: 'user', content });
   }

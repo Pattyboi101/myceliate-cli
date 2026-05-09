@@ -3,6 +3,7 @@ import type { Queue, QueueEvents } from 'bullmq';
 import { z } from 'zod';
 import type { BashJobData, BashJobReturn } from '../queue/queues.js';
 import type { HitlGate } from '../security/hitlGate.js';
+import type { WorkerHandle } from './workerLifecycle.js';
 import type { SporeRegistry } from '../spores/SporeRegistry.js';
 import { childProcessSpawn } from '../spores/childProcessSpawn.js';
 import { createBashTool } from '../tools/bash.js';
@@ -21,6 +22,8 @@ export interface BootToolsOpts {
   queue?: Queue<BashJobData, BashJobReturn>;
   /** Required for bash tool completion events (may be omitted in tests that don't run bash). */
   queueEvents?: QueueEvents;
+  /** Required for real bash registration — enables crash detection via pending-jobs Map. */
+  worker?: WorkerHandle;
   registry: SporeRegistry;
   cwd?: string;
   logger: Logger;
@@ -52,15 +55,16 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
   tools.register(listDirTool);
   tools.register(grepTool);
 
-  // Bash tool requires queue + queueEvents. When they are absent (test stubs),
+  // Bash tool requires queue + queueEvents + worker. When any are absent (test stubs),
   // register a no-op stub so the registry shape is complete but no real jobs
-  // are dispatched. Production callers always provide both.
-  if (opts.queue && opts.queueEvents) {
+  // are dispatched. Production callers always provide all three.
+  if (opts.queue && opts.queueEvents && opts.worker) {
     tools.register(
       createBashTool({
         hitl: opts.hitl,
         queue: opts.queue,
         queueEvents: opts.queueEvents,
+        worker: opts.worker,
         defaultTimeoutMs: 30_000,
       }),
     );

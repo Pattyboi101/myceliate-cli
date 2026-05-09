@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { Queue, QueueEvents } from 'bullmq';
 import { z } from 'zod';
 import type { BashJobData, BashJobReturn } from '../queue/queues.js';
+import type { WorkerHandle } from '../runtime/workerLifecycle.js';
 import type { HitlGate } from '../security/hitlGate.js';
 import type { Tool } from './registry.js';
 
@@ -17,6 +18,7 @@ export type BashToolDeps = {
   hitl: HitlGate;
   queue: Queue<BashJobData, BashJobReturn>;
   queueEvents: QueueEvents;
+  worker: WorkerHandle;
   defaultTimeoutMs?: number;
 };
 

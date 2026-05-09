@@ -202,6 +202,7 @@ async function main(): Promise<void> {
     hitl,
     queue,
     queueEvents,
+    worker,                         // v1.5 Task 7: thread WorkerHandle for crash detection
     registry: spores.registry,
     cwd,
     logger,

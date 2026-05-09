@@ -8,6 +8,8 @@
  *   FAKE_TRAP_SIGTERM=1       — ignore SIGTERM (for SIGKILL escalation tests in T24)
  *   FAKE_DEBUG_TO_STDOUT=1    — write a non-JSON debug line to stdout before first response
  *                               (reproduces the stdio-hygiene corruption scenario)
+ *   FAKE_EXIT_AFTER_TOOL_CALL=1 — respond to tools/call normally, then immediately exit(1)
+ *                               via setImmediate (simulates unexpected crash mid-session)
  */
 
 import * as readline from 'node:readline';
@@ -16,6 +18,7 @@ const initDelayMs = Number(process.env.FAKE_INITIALIZE_DELAY_MS ?? 0);
 const callDelayMs = Number(process.env.FAKE_CALL_DELAY_MS ?? 0);
 const trapSigterm = process.env.FAKE_TRAP_SIGTERM === '1';
 const debugToStdout = process.env.FAKE_DEBUG_TO_STDOUT === '1';
+const exitAfterToolCall = process.env.FAKE_EXIT_AFTER_TOOL_CALL === '1';
 
 if (trapSigterm) {
   process.on('SIGTERM', () => {
@@ -131,6 +134,11 @@ async function handleLine(line) {
       },
       id,
     );
+    if (exitAfterToolCall) {
+      // Defer exit via setImmediate so the response frame is fully written
+      // before the process dies, simulating an unexpected crash mid-session.
+      setImmediate(() => process.exit(1));
+    }
     return;
   }
 

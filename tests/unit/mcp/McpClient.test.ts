@@ -1,8 +1,7 @@
 // tests/unit/mcp/McpClient.test.ts
-import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   McpServerCrashedError,
   McpToolTimeoutError,
@@ -108,97 +107,49 @@ describe('McpClient', () => {
       await client.close();
     });
 
-    it('isFaulted() returns true after unexpected child exit', async () => {
-      const client = makeClient();
+    it('isFaulted() flips to true after underlying child exits unexpectedly', async () => {
+      const client = makeClient({ FAKE_EXIT_AFTER_TOOL_CALL: '1' });
       await client.initialize();
-
-      // Kill the server child directly via the underlying PID
-      // We use a separate spawn to SIGKILL the child identified by the transport
-      // Allow the close event to propagate
-      const crashPromise = new Promise<void>((resolve) => {
-        client.onUnexpectedExit(() => resolve());
-      });
-
-      // Spawn a kill command targeting the fake server by its parent pid match
-      // Strategy: kill the child process the client spawned.
-      // Since we don't have direct PID access, spawn a fresh fake-server and SIGKILL it
-      // instead — use the helper below.
-      const child = spawn(process.execPath, [FAKE_SERVER], {
-        stdio: 'pipe',
-        env: { ...(process.env as Record<string, string>) },
-      });
-
-      // Give it a moment to start, then kill it
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
-      child.kill('SIGKILL');
-      child.unref();
-
-      // The client's own internal child should still be running. Close it cleanly.
-      await client.close();
+      // Trigger the crash: fake-server responds then calls process.exit(1) via setImmediate
+      await client.callTool('echo', { x: 'trigger-exit' });
+      // Wait for the transport onclose event to propagate through the SDK
+      await new Promise<void>((r) => setTimeout(r, 100));
+      expect(client.isFaulted()).toBe(true);
     });
 
-    it('subsequent callTool rejects with McpServerCrashedError after crash', async () => {
-      // Create a dedicated client whose child we can terminate externally.
-      // We do this by detecting the child PID via a helper + SIGKILL.
-      // Since StdioClientTransport spawns its own process, we track by spawning
-      // a fresh fake process here just to verify the error class shape.
-      const client = makeClient();
+    it('subsequent callTool rejects with McpServerCrashedError after underlying child exits unexpectedly', async () => {
+      const client = makeClient({ FAKE_EXIT_AFTER_TOOL_CALL: '1' });
       await client.initialize();
-
-      // Force-fault the client by forcibly killing the internal process via signal
-      // We accomplish this by having the fake exit itself: re-use FAKE_CALL_DELAY_MS
-      // of 0 and terminating by closing stdin of the transport (close the client)
-      // then immediately checking. Instead, we test via a direct internal trick:
-      // create client, set faulted via a timeout that makes the server exit.
-
-      // Use a separate helper client with a very short timeout to induce faulted state
-      const faultClient = makeClient({ FAKE_CALL_DELAY_MS: '0' }, { callTimeoutMs: 1 });
-      await faultClient.initialize();
-
-      // This should timeout and potentially fault
-      await faultClient.callTool('echo', { x: 'x' }).catch(() => {});
-
-      await faultClient.close().catch(() => {});
-    });
-
-    it('onUnexpectedExit fires when child exits without client.close()', async () => {
-      const client = makeClient();
-      await client.initialize();
-
-      const exitInfoPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-        (resolve) => {
-          client.onUnexpectedExit((info) => resolve(info));
-        },
+      // Trigger the crash
+      await client.callTool('echo', { x: 'trigger-exit' });
+      // Wait for the transport onclose event to propagate
+      await new Promise<void>((r) => setTimeout(r, 100));
+      // The next call must reject with McpServerCrashedError
+      await expect(client.callTool('echo', { x: 'whatever' })).rejects.toThrow(
+        McpServerCrashedError,
       );
+      await expect(client.callTool('echo', { x: 'whatever' })).rejects.toMatchObject({
+        name: 'McpServerCrashedError',
+        server: expect.any(String),
+      });
+    });
 
-      // Kill the child process. We access the underlying process via the transport pid.
-      // Since we can't access private transport.pid from outside, use process.kill on
-      // all fake-server processes. Instead, we kill via the client internal mechanism.
-      // Approach: use a client whose child crashes via stdin-close (rl 'close' event → exit 0).
-      // The fake-server exits with code 0 when stdin closes — that IS clean shutdown.
-      // For a real crash, we need SIGKILL. We do this by spawning and killing a known
-      // helper process to trigger the close path. The real test is that the handler fires.
-
-      // We force crash by directly destroying the underlying transport:
-      // Close stdin on the child to trigger an exit. But we need it to be unexpected.
-      // Best approach: use a short-lived client against a variant that exits immediately.
-
-      // Alternative approach that works: kill the process group using process.kill(-pid)
-      // but we don't have pid. Instead, use a test-helper env var that makes the server
-      // exit after a short delay on its own — simulate crash.
-      // Since the fake-server exits when stdin closes, calling transport close
-      // would trigger onUnexpectedExit if we set _closing = false... not ideal.
-
-      // Pragmatic: test that the handler is registered (isFaulted starts false),
-      // then close the client cleanly (onUnexpectedExit should NOT fire on clean close).
-      await client.close();
-
-      // After clean close, the handler should not have fired yet (timeout to verify)
-      const raceResult = await Promise.race([
-        exitInfoPromise.then(() => 'fired'),
-        new Promise<string>((r) => setTimeout(() => r('not-fired'), 200)),
-      ]);
-      expect(raceResult).toBe('not-fired');
+    it('onUnexpectedExit handler fires exactly once when child exits unexpectedly', async () => {
+      const handlerSpy = vi.fn();
+      const client = makeClient({ FAKE_EXIT_AFTER_TOOL_CALL: '1' });
+      client.onUnexpectedExit(handlerSpy);
+      await client.initialize();
+      // Trigger the crash
+      await client.callTool('echo', { x: 'trigger-exit' });
+      // Wait for propagation
+      await new Promise<void>((r) => setTimeout(r, 100));
+      // Handler should have fired exactly once with a valid info object.
+      // Note: the SDK StdioClientTransport does not expose exit code/signal from
+      // the child 'close' event — both arrive as null. We assert shape only.
+      expect(handlerSpy).toHaveBeenCalledTimes(1);
+      expect(handlerSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ code: null, signal: null }),
+      );
     });
 
     it('onUnexpectedExit does NOT fire when caller invokes client.close()', async () => {

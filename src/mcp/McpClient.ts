@@ -131,8 +131,8 @@ class McpClientImpl implements McpClient {
     const { command, serverName } = opts;
     this._serverName = serverName ?? command.split('/').at(-1) ?? command;
     this._initTimeoutMs =
-      opts.initializeTimeoutMs ?? Number(process.env.MCP_INITIALIZE_TIMEOUT_MS ?? 5000);
-    this._callTimeoutMs = opts.callTimeoutMs ?? Number(process.env.MCP_CALL_TIMEOUT_MS ?? 30000);
+      opts.initializeTimeoutMs ?? (Number(process.env.MCP_INITIALIZE_TIMEOUT_MS) || 5000);
+    this._callTimeoutMs = opts.callTimeoutMs ?? (Number(process.env.MCP_CALL_TIMEOUT_MS) || 30000);
     this._logger = opts.logger;
   }
 

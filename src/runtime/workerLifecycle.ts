@@ -1,5 +1,8 @@
 // src/runtime/workerLifecycle.ts
 import { type ChildProcess, spawn } from 'node:child_process';
+import { createWriteStream, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { getRedis } from '../queue/connection.js';
 import type { Logger } from '../util/logger.js';
 
 export type WorkerHandle = {
@@ -54,28 +57,61 @@ export async function startWorker(opts: {
   logger: Logger;
   logsDir: string;
 }): Promise<WorkerHandle> {
-  // opts referenced for now to satisfy noUnusedParameters; later tasks consume them.
-  void opts;
+  // Redis pre-flight ping — fail-fast with a clean diagnostic if Redis is down.
+  try {
+    await getRedis(opts.redisUrl).ping();
+  } catch (err) {
+    throw new RedisUnavailableError(err instanceof Error ? err : new Error(String(err)));
+  }
 
   // Phase 14 review m2 fix: stdout/stderr are 'pipe' (not 'inherit') because
   // the parent has Ink mounted — direct worker writes to the parent's stdout
-  // would corrupt the TUI per U4. Pipes are immediately drained via `.resume()`
-  // so the ~64KB pipe buffer never fills (which would block the worker on its
-  // next write). Task 4 will replace `.resume()` with file-stream piping.
+  // would corrupt the TUI per U4. Pipes are routed to the worker log file
+  // (Task 4) instead of being discarded via .resume().
   const child = spawn('pnpm', ['queue:worker'], {
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, REDIS_URL: opts.redisUrl },
     detached: false,
   });
-  child.stdout?.resume();
-  child.stderr?.resume();
+  mkdirSync(opts.logsDir, { recursive: true });
+  const workerLog = createWriteStream(join(opts.logsDir, 'worker.log'), { flags: 'a' });
+  child.stdout?.pipe(workerLog);
+  child.stderr?.pipe(workerLog);
   // Phase 14 review m1 fix: spawn 'error' (ENOENT/EACCES) is otherwise an
   // unhandled EventEmitter error that crashes main. Surface it via stderr
   // before Ink mounts.
   child.on('error', (err) => {
     process.stderr.write(`[workerLifecycle] spawn error: ${err.message}\n`);
   });
+  // Task 5: Map-backed pending-jobs registry for ~100ms crash detection.
+  const pendingJobs = new Map<string, (err: Error) => void>();
+  const trackJob: WorkerHandle['trackJob'] = (jobId, reject) => {
+    pendingJobs.set(jobId, reject);
+  };
+  const releaseJob: WorkerHandle['releaseJob'] = (jobId) => {
+    pendingJobs.delete(jobId);
+  };
+  // Task 6: shutdownInitiated flag distinguishes clean shutdown from crash.
+  let shutdownInitiated = false;
   let shuttingDown = false;
+  // Task 6: crash handler — distinguishes clean shutdown from unexpected exit.
+  child.on('exit', (code, signal) => {
+    if (shutdownInitiated) {
+      opts.logger.info({ event: 'worker_shutdown_complete', code, signal });
+      return;
+    }
+    if (code !== 0 || pendingJobs.size > 0) {
+      const pendingIds = [...pendingJobs.keys()];
+      opts.logger.error({ event: 'worker_crashed', exitCode: code, signal, pendingJobs: pendingIds });
+      const err = new WorkerCrashedError(code, signal);
+      for (const reject of pendingJobs.values()) {
+        reject(err);
+      }
+      pendingJobs.clear();
+    }
+  });
   const shutdown = async (): Promise<void> => {
+    shutdownInitiated = true;
     if (shuttingDown) return;
     shuttingDown = true;
     if (child.exitCode !== null) return; // already exited
@@ -91,8 +127,5 @@ export async function startWorker(opts: {
       });
     });
   };
-  // No-op stubs — Task 5 implements the real Map-backed pending-jobs registry.
-  const trackJob: WorkerHandle['trackJob'] = () => {};
-  const releaseJob: WorkerHandle['releaseJob'] = () => {};
   return { child, trackJob, releaseJob, shutdown };
 }

@@ -24,6 +24,7 @@ import { V4Adapter } from './adapters/v4/adapter.js';
 import { ConversationLog } from './memory/conversationLog.js';
 import { MarkdownStore } from './memory/markdownStore.js';
 import type { QueryEngine } from './orchestrator/QueryEngine.js';
+import { composeSystemSections } from './orchestrator/composeSystemSections.js';
 import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
@@ -104,7 +105,7 @@ async function main(): Promise<void> {
 
   // Phase 19: boot sector spores (unless --no-spore).
   const cwd = process.cwd();
-  const spores = await bootSpores(cwd, noSpore);
+  const spores = await bootSpores(cwd, noSpore, logger);
   let activeSpore = spores.activeSpore;
   let engineRef: QueryEngine | null = null;
 
@@ -268,11 +269,10 @@ async function main(): Promise<void> {
   // snapshot.slice(0) and re-append every rehydrated message, duplicating the log.
   let lastSnapshotLen = initialHistory?.length ?? 0;
 
-  const descs = spores.registry.getDescriptions();
-  const descriptionsSection =
-    descs.length > 0
-      ? `\n\n## Available sector spores\n\nIf the user's intent aligns with one of these sectors, you MUST call the \`germinate_spore({ name })\` tool immediately — before answering — to load that sector's persona roster into context. Skip germination only when the request is genuinely off-sector or trivially conversational ("what's 2+2", "hi"). Don't try to answer in-sector questions from base weights when the right spore is right there.\n\n${descs.map((d) => `- \`${d.name}\` (${d.accent_color}): ${d.description}`).join('\n')}\n`
-      : '';
+  const descriptionsSection = composeSystemSections({
+    registry: spores.registry,
+    activeSpore: spores.activeSpore,
+  });
 
   try {
     await runReplSession({

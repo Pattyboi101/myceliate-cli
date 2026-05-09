@@ -36,6 +36,7 @@ import {
   parseNoSporeFlag,
   parseResumeFlag,
 } from './runtime/resume.js';
+import { checkAndWarnEnvOverride } from './runtime/roleToModel.js';
 import { startWorker } from './runtime/workerLifecycle.js';
 import { type ApprovalRequest, type ApprovalResponse, HitlGate } from './security/hitlGate.js';
 import { bootSpores } from './spores/bootSpores.js';
@@ -44,13 +45,9 @@ import { runOnboarding } from './ui/onboarding.js';
 import { createLogger } from './util/logger.js';
 
 async function main(): Promise<void> {
-  const onboarding = await runOnboarding({
-    ...(process.env.DEEPSEEK_API_KEY ? { apiKey: process.env.DEEPSEEK_API_KEY } : {}),
-    ...(process.env.DEEPSEEK_ADAPTER === 'v3' || process.env.DEEPSEEK_ADAPTER === 'v4'
-      ? { adapter: process.env.DEEPSEEK_ADAPTER }
-      : {}),
-    ...(process.env.DEEPSEEK_MODEL ? { model: process.env.DEEPSEEK_MODEL } : {}),
-  });
+  // Phase 2 boot reorder: senseContext + createLogger + checkAndWarnEnvOverride run BEFORE
+  // runOnboarding so the env-override warn fires before Ink mounts (U4-safe: stderr only).
+  const ctx = await senseContext({ cwd: process.cwd() });
 
   // Phase 18: parse --resume before heavy initialisation so we can exit early
   // on an invalid flag without spinning up Redis, Ink, etc.
@@ -58,9 +55,17 @@ async function main(): Promise<void> {
   // Phase 19: --no-spore opts out of sector-pack loading.
   const noSpore = parseNoSporeFlag(process.argv.slice(2));
 
-  const ctx = await senseContext({ cwd: process.cwd() });
   const sessionId = resumeId ?? randomUUID();
   const logger = createLogger({ logsDir: join(ctx.memoryDir, 'logs') });
+  checkAndWarnEnvOverride(logger);
+
+  const onboarding = await runOnboarding({
+    ...(process.env.DEEPSEEK_API_KEY ? { apiKey: process.env.DEEPSEEK_API_KEY } : {}),
+    ...(process.env.DEEPSEEK_ADAPTER === 'v3' || process.env.DEEPSEEK_ADAPTER === 'v4'
+      ? { adapter: process.env.DEEPSEEK_ADAPTER }
+      : {}),
+    ...(process.env.DEEPSEEK_MODEL ? { model: process.env.DEEPSEEK_MODEL } : {}),
+  });
   const memory = new MarkdownStore(ctx.memoryDir);
   const conversation = new ConversationLog(memory, sessionId);
 
@@ -133,7 +138,10 @@ async function main(): Promise<void> {
     bootWarnings: [],
   };
   const banner = {
-    model: onboarding.model,
+    model:
+      process.env.DEEPSEEK_MODEL && process.env.DEEPSEEK_MODEL.length > 0
+        ? process.env.DEEPSEEK_MODEL
+        : 'auto (Anamorph/Teleomorph)',
     adapter: onboarding.adapter,
     cwd: process.cwd(),
   };
@@ -262,7 +270,6 @@ async function main(): Promise<void> {
     await runReplSession({
       client,
       tools,
-      model: onboarding.model,
       cwd: process.cwd(),
       systemPrompt: buildSystemPrompt(ctx) + spores.germinatedSection + descriptionsSection,
       workingBudget: Number(process.env.WORKING_TOKEN_BUDGET ?? 200_000),

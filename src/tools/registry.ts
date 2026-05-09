@@ -101,7 +101,8 @@ export class ToolRegistry {
       description: t.description,
       parameters:
         t.inputSchema.kind === 'zod'
-          ? zodToStrictJsonSchema(t.inputSchema.zod as z.ZodTypeAny)
+          ? // ZodType<unknown> is structurally ZodTypeAny; cast is safe — map erases Input.
+            zodToStrictJsonSchema(t.inputSchema.zod as z.ZodTypeAny)
           : t.inputSchema.jsonSchema,
     }));
   }

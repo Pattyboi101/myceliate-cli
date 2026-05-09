@@ -148,7 +148,7 @@ describe('ToolRegistry', () => {
 
   // ---- T21: deregister + dual-schema ----
 
-  it('deregister(name) removes the tool; subsequent getActiveTools excludes it', () => {
+  it('deregister(name) removes the tool; subsequent getActiveTools excludes it', async () => {
     const r = new ToolRegistry();
     r.register({
       name: 'echo',
@@ -160,6 +160,7 @@ describe('ToolRegistry', () => {
     expect(r.getActiveTools().map((t) => t.name)).toContain('echo');
     r.deregister('echo');
     expect(r.getActiveTools().map((t) => t.name)).not.toContain('echo');
+    await expect(r.invoke('echo', {})).rejects.toThrow(/Unknown tool/i);
   });
 
   it('deregister(name) is a no-op for unknown names (no throw)', () => {

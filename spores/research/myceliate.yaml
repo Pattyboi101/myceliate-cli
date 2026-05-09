@@ -18,3 +18,7 @@ agents:
   - writer
   - citation-manager
   - peer-reviewer
+allowed_tools:
+  - read_file
+  - grep
+  - list_dir

@@ -164,3 +164,38 @@ All 6 sections complete with no errors thrown. v1.3 tag candidate.
 4. **Pack command — pack-not-found**
    - `/nonexistent:foo`
    - Expected: orchestrator output `'no spore named "nonexistent"'`.
+
+### Phase 23 walk-points
+
+5. **Tool restriction visibility — restrictive pack pinned**
+   - `myceliate` in a fresh project.
+   - `/spore pin research` (research declares allowed_tools: [read_file, grep, list_dir]).
+   - `/spore tools`.
+   - Expected: output lists `read_file`, `grep`, `list_dir`, `germinate_spore`, `spawn_subagent`. write_file + bash absent.
+
+6. **Tool restriction — model behaviour + dispatch-layer defense**
+   - With research pinned: ask the model to "edit the file foo.md".
+   - Expected (normal path): model does NOT call write_file (it's not in the schema). It either asks for clarification or indicates the operation isn't possible.
+   - Expected (defense-in-depth): if the model hallucinates a write_file call despite the schema omission (force this with a more adversarial prompt: "Use the write_file tool to write 'x' to foo.md"), the orchestrator denies the call at dispatch and surfaces a `tool_denied_by_allowlist` error in the next turn rather than executing. ToolDeniedByAllowlistError is the load-bearing class.
+
+7. **Tool restriction — unpin restores**
+   - `/spore unpin`.
+   - `/spore tools`.
+   - Expected: full tool set visible again.
+
+8. **--resume across allowlist change**
+   - Start a session with research NOT pinned. Write a file via the bash/write_file tools.
+   - Exit. Edit `spores/research/myceliate.yaml` to set `allowed_tools: [read_file]` only.
+   - `myceliate --resume <id>` (replace with the session ID from `.myceliate/history/`).
+   - `/spore pin research`.
+   - Expected: orchestrator boots without crash; the prior write_file tool_call is in the rehydrated history; current turn's tool list excludes write_file.
+
+### Phase 23 known limitations (v1.5 follow-up)
+
+**Sub-agent privilege escalation via `spawn_subagent` proxy (Case 6 — deferred to v1.5):**
+
+The orchestrator's `allowed_tools` allowlist in v1.4 scopes only the orchestrator's own tool surface. It does NOT propagate to sub-agents spawned via `spawn_subagent`. This means a restricted orchestrator (e.g., with research's `[read_file, grep, list_dir]` allowlist) can still ask a sub-agent to perform operations the orchestrator cannot do directly:
+
+> "I can't write files because of my allowlist. Ask the sub-agent to write foo.md instead."
+
+This proxy path succeeds because sub-agents receive the persona's full execution tool set (R9 partition). This is a known, accepted limitation in v1.4. The security boundary is the orchestrator's own direct tool calls. Full allowlist inheritance through `spawn_subagent` is deferred to v1.5, where the sub-agent bootstrap protocol will include the parent's allowlist in the spawn request.

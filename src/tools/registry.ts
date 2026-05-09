@@ -21,16 +21,43 @@ export type ToolRunContext = {
   toolUseId: string;
 };
 
+/** Phase 23: thrown when invoke() is called for a tool not visible in the active
+ * spore's allowlist. The ReAct loop catches this and surfaces a tool error
+ * result so the model can recover. Carries `cause` per CLAUDE.md "errors are
+ * typed and carry cause" convention, mirroring SkillFrontmatterError. */
+export class ToolDeniedByAllowlistError extends Error {
+  constructor(
+    public readonly toolName: string,
+    override readonly cause?: unknown,
+  ) {
+    super(`Tool execution denied by active spore allowlist: ${toolName}`);
+    this.name = 'ToolDeniedByAllowlistError';
+  }
+}
+
 export class ToolRegistry {
   private readonly tools = new Map<string, Tool<unknown>>();
+  private activeAllowlist: string[] | null = null;
 
   register<I>(tool: Tool<I>): void {
     if (this.tools.has(tool.name)) throw new Error(`Tool already registered: ${tool.name}`);
     this.tools.set(tool.name, tool as Tool<unknown>);
   }
 
+  setActiveAllowlist(names: string[] | null): void {
+    this.activeAllowlist = names;
+  }
+
+  getActiveTools(): Tool<unknown>[] {
+    if (this.activeAllowlist === null) return [...this.tools.values()];
+    const allowed = new Set(this.activeAllowlist);
+    return [...this.tools.values()].filter(
+      (t) => t.capability === 'coordination' || allowed.has(t.name),
+    );
+  }
+
   definitions(): ToolDefinition[] {
-    return [...this.tools.values()].map((t) => ({
+    return this.getActiveTools().map((t) => ({
       name: t.name,
       description: t.description,
       parameters: zodToStrictJsonSchema(t.inputSchema as unknown as z.ZodTypeAny),
@@ -44,6 +71,16 @@ export class ToolRegistry {
   async invoke(name: string, rawInput: unknown, ctx?: Partial<ToolRunContext>): Promise<string> {
     const tool = this.tools.get(name);
     if (!tool) throw new Error(`Unknown tool: ${name}`);
+    // Phase 23 dispatch-layer gate. Topology: dispatch authorization is DERIVED
+    // from the schema layer — invoke() can only execute a tool the orchestrator
+    // just offered to the model via getActiveTools()/definitions(). The two
+    // layers cannot drift because there is no separate predicate to maintain.
+    // No bypass path exists: v1.4 --resume only reconstructs message history
+    // and never re-invokes historical tool_calls, so the gate is unconditional.
+    // Cost: O(n) over ~20 tools, sub-millisecond in an I/O-bound CLI.
+    if (!this.getActiveTools().some((t) => t.name === name)) {
+      throw new ToolDeniedByAllowlistError(name);
+    }
     const parsed = tool.inputSchema.parse(rawInput);
     const fullCtx: ToolRunContext = {
       cwd: ctx?.cwd ?? process.cwd(),

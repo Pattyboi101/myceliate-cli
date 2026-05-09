@@ -1,10 +1,29 @@
 import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { Message } from '../adapters/messages.js';
+import { HitlGate } from '../security/hitlGate.js';
 import { grepTool } from '../tools/grep.js';
 import { listDirTool } from '../tools/listDir.js';
-import { readFileTool } from '../tools/readFile.js';
+import { createReadFileTool } from '../tools/readFile.js';
 import { ToolRegistry } from '../tools/registry.js';
-import { writeFileTool } from '../tools/writeFile.js';
+import { createWriteFileTool } from '../tools/writeFile.js';
+
+/**
+ * v1.5 Cortina: subagents run in subprocesses with no UI for HITL prompts.
+ * They get a HitlGate variant that auto-rejects any operation that would
+ * normally require approval (writes outside cwd, reads of sensitive paths).
+ * The subagent receives the rejection as a tool error and either retries
+ * with a cwd-relative path or surfaces the limitation back to the orchestrator.
+ *
+ * Symmetric security posture vs orchestrator without requiring IPC for HITL.
+ */
+function buildSubagentHitl(): HitlGate {
+  return new HitlGate({
+    requestApproval: async (req) => ({
+      decision: 'reject',
+      feedback: `subagent cannot prompt for approval (no UI). ${req.reason}. Restructure to use a cwd-relative path or escalate to the orchestrator.`,
+    }),
+  });
+}
 
 /**
  * Build a sub-agent-scoped ToolRegistry containing only execution tools (R9).
@@ -12,10 +31,11 @@ import { writeFileTool } from '../tools/writeFile.js';
  */
 function buildSubagentRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
-  registry.register(readFileTool);
+  const hitl = buildSubagentHitl();
+  registry.register(createReadFileTool({ hitl }));
   registry.register(listDirTool);
   registry.register(grepTool);
-  registry.register(writeFileTool);
+  registry.register(createWriteFileTool({ hitl }));
   // Note: bash is NOT registered for sub-agents in v1 — sub-agents can read/write
   // files and grep, but cannot execute arbitrary shell commands. Extend in v1.3+.
   return registry;

@@ -2,8 +2,19 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getRedis } from '../queue/connection.js';
 import type { Logger } from '../util/logger.js';
+
+// Resolve the myceliate-cli package root relative to THIS file so `pnpm queue:worker`
+// can find package.json regardless of the user's cwd.
+//   dev:  src/runtime/workerLifecycle.ts → ../.. = myceliate-cli/
+//   prod: dist/runtime/workerLifecycle.js → ../.. = myceliate-cli/
+// Without this, spawn('pnpm', ...) inherits the user's cwd; running myceliate from
+// any directory without a package.json (e.g. /tmp) fails with ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND
+// in worker.log and the bash tool then crashes via WorkerCrashedError. Pre-existing
+// since v1.1; surfaced by Phase 1's stdio→worker.log routing during the v1.5 smoke audit.
+const myceliateCliRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 export type WorkerHandle = {
   child: ChildProcess;
@@ -70,6 +81,7 @@ export async function startWorker(opts: {
   // (Task 4) instead of being discarded via .resume().
   const child = spawn('pnpm', ['queue:worker'], {
     stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: myceliateCliRoot,
     env: { ...process.env, REDIS_URL: opts.redisUrl },
     detached: false,
   });

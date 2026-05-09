@@ -9,10 +9,10 @@ import { createBashTool } from '../tools/bash.js';
 import { createGerminateSporeTool } from '../tools/germinate_spore.js';
 import { grepTool } from '../tools/grep.js';
 import { listDirTool } from '../tools/listDir.js';
-import { readFileTool } from '../tools/readFile.js';
+import { createReadFileTool } from '../tools/readFile.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { createSpawnSubagentTool } from '../tools/spawn_subagent.js';
-import { writeFileTool } from '../tools/writeFile.js';
+import { createWriteFileTool } from '../tools/writeFile.js';
 import type { Logger } from '../util/logger.js';
 import type { WorkerHandle } from './workerLifecycle.js';
 
@@ -50,8 +50,8 @@ const BashStubSchema = z.object({ command: z.string().min(1) }).strict();
 export function bootTools(opts: BootToolsOpts): BootToolsResult {
   const tools = new ToolRegistry();
 
-  tools.register(readFileTool);
-  tools.register(writeFileTool);
+  tools.register(createReadFileTool({ hitl: opts.hitl }));
+  tools.register(createWriteFileTool({ hitl: opts.hitl }));
   tools.register(listDirTool);
   tools.register(grepTool);
 

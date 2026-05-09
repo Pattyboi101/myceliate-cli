@@ -1,9 +1,22 @@
 // tests/unit/runtime/replSession.test.ts
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { DeepSeekClient } from '../../../src/adapters/DeepSeekClient.js';
 import type { Message } from '../../../src/adapters/messages.js';
 import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
 import { runReplSession } from '../../../src/runtime/replSession.js';
+import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
+import type { Logger } from '../../../src/util/logger.js';
+
+const noopLogger: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  flush: async () => {},
+};
 
 function mockClient(scriptedTurns: StreamEvent[][]): {
   stream: (req: unknown) => AsyncIterable<StreamEvent>;
@@ -136,5 +149,131 @@ describe('runReplSession', () => {
       readNextPrompt: async () => '/quit',
     });
     expect(calls).toBe(0);
+  });
+});
+
+describe('replSession slash dispatcher routing', () => {
+  async function buildFixtureRegistry(): Promise<{ registry: SporeRegistry; cleanup: () => Promise<void> }> {
+    const root = await mkdtemp(join(tmpdir(), 'myc-repl-disp-'));
+    const packDir = join(root, 'research');
+    await mkdir(join(packDir, 'commands'), { recursive: true });
+    await writeFile(
+      join(packDir, 'myceliate.yaml'),
+      'name: research\ndescription: Research.\nversion: 1.0.0\naccent_color: "#4a90c4"\nagents: []',
+      'utf8',
+    );
+    await writeFile(
+      join(packDir, 'SKILL.md'),
+      '---\nname: research\ndescription: Research.\n---\nbody',
+      'utf8',
+    );
+    await writeFile(
+      join(packDir, 'commands', 'lit-review.md'),
+      '---\nname: lit-review\ndescription: Lit review.\nargument-hint: <topic>\n---\n\nProduce a lit review on: $ARGUMENTS',
+      'utf8',
+    );
+    const registry = await SporeRegistry.discover(
+      { bundledDir: root, userDir: '/nonexistent', projectDir: '/nonexistent' },
+      { logger: noopLogger },
+    );
+    return { registry, cleanup: () => rm(root, { recursive: true, force: true }) };
+  }
+
+  it('expanded-prompt: dispatcher result body is appended to engine + react loop runs', async () => {
+    const { registry, cleanup } = await buildFixtureRegistry();
+    try {
+      const slashOutputs: string[] = [];
+      const completedTurnSnapshots: Message[][] = [];
+      const client = mockClient([
+        [
+          { type: 'content_delta', text: 'lit review answer' },
+          { type: 'done', usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 } },
+        ],
+      ]);
+      const prompts = ['/research:lit-review graphene', '/quit'];
+      let pi = 0;
+      await runReplSession({
+        client: client as unknown as DeepSeekClient,
+        // biome-ignore lint/suspicious/noExplicitAny: mock collaborator
+        tools: { definitions: () => [], invoke: vi.fn() } as any,
+        model: 'mock',
+        cwd: '/tmp',
+        sporeRegistry: registry,
+        logger: noopLogger,
+        getActiveSpore: () => 'research',
+        onState: () => {},
+        onSlashOutput: (t) => slashOutputs.push(t),
+        onTurnComplete: (snap) => completedTurnSnapshots.push([...snap]),
+        readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      });
+      // The expanded body (not the raw slash input) should appear as the user message
+      expect(completedTurnSnapshots.length).toBe(1);
+      const userMsg = completedTurnSnapshots[0]?.find((m) => m.role === 'user');
+      expect(userMsg).toBeDefined();
+      if (userMsg && 'content' in userMsg && typeof userMsg.content === 'string') {
+        expect(userMsg.content).toContain('Produce a lit review on: graphene');
+        expect(userMsg.content).not.toContain('/research:lit-review');
+      }
+      // No orchestrator-output was emitted
+      expect(slashOutputs).toHaveLength(0);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('orchestrator-output: dispatcher message routes through onSlashOutput', async () => {
+    const { registry, cleanup } = await buildFixtureRegistry();
+    try {
+      const slashOutputs: string[] = [];
+      const client = mockClient([]);
+      const prompts = ['/research:nonexistent-cmd', '/quit'];
+      let pi = 0;
+      await runReplSession({
+        client: client as unknown as DeepSeekClient,
+        // biome-ignore lint/suspicious/noExplicitAny: mock collaborator
+        tools: { definitions: () => [], invoke: vi.fn() } as any,
+        model: 'mock',
+        cwd: '/tmp',
+        sporeRegistry: registry,
+        logger: noopLogger,
+        getActiveSpore: () => 'research',
+        onState: () => {},
+        onSlashOutput: (t) => slashOutputs.push(t),
+        onTurnComplete: () => {},
+        readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      });
+      // The failure message routes via onSlashOutput; engine is NOT advanced
+      expect(slashOutputs.some((s) => s.includes('has no command'))).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('no-match: /spore commands still work via existing inline block', async () => {
+    const { registry, cleanup } = await buildFixtureRegistry();
+    try {
+      const slashOutputs: string[] = [];
+      const client = mockClient([]);
+      const prompts = ['/spore list', '/quit'];
+      let pi = 0;
+      await runReplSession({
+        client: client as unknown as DeepSeekClient,
+        // biome-ignore lint/suspicious/noExplicitAny: mock collaborator
+        tools: { definitions: () => [], invoke: vi.fn() } as any,
+        model: 'mock',
+        cwd: '/tmp',
+        sporeRegistry: registry,
+        logger: noopLogger,
+        getActiveSpore: () => null,
+        onState: () => {},
+        onSlashOutput: (t) => slashOutputs.push(t),
+        onTurnComplete: () => {},
+        readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      });
+      // /spore list output contains 'research' (the fixture pack)
+      expect(slashOutputs.some((s) => s.includes('research'))).toBe(true);
+    } finally {
+      await cleanup();
+    }
   });
 });

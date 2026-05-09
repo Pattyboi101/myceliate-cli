@@ -288,6 +288,8 @@ async function main(): Promise<void> {
         engineRef = engine;
       },
       sporeRegistry: spores.registry,
+      logger,
+      getActiveSpore: () => activeSpore,
       onSlashOutput: (text) => {
         // Phase 21: render slash command output as a completed turn (no streaming).
         const newTurn: CompletedTurn = { userInput: '', content: text };

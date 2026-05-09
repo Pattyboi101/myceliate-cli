@@ -8,15 +8,7 @@ import type { Message } from '../../../src/adapters/messages.js';
 import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
 import { runReplSession } from '../../../src/runtime/replSession.js';
 import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
-import type { Logger } from '../../../src/util/logger.js';
-
-const noopLogger: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  flush: async () => {},
-};
+import { noopLogger } from '../../../src/util/noopLogger.js';
 
 function mockClient(scriptedTurns: StreamEvent[][]): {
   stream: (req: unknown) => AsyncIterable<StreamEvent>;

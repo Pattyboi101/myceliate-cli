@@ -18,6 +18,12 @@ let prevLevel: 0 | 1 | 2 | 3;
 beforeAll(() => {
   prevLevel = chalk.level;
   chalk.level = 3; // truecolor
+  // Defend against silent failure if chalk ever exposes `level` as a getter-only
+  // property — without this guard, mutation would no-op and tests would pass
+  // against a non-truecolor fallback rather than the production ANSI escape.
+  if (chalk.level !== 3) {
+    throw new Error('chalk.level mutation did not take effect — ANSI assertions would be invalid');
+  }
 });
 afterAll(() => {
   chalk.level = prevLevel;

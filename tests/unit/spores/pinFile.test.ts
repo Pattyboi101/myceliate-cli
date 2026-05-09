@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PIN_FILENAME, clearPin, readPin, writePin } from '../../../src/spores/pinFile.js';
 import type { Logger } from '../../../src/util/logger.js';
+import { noopLogger } from '../../../src/util/noopLogger.js';
 
 function fakeLogger(): { logger: Logger; calls: Array<Record<string, unknown>> } {
   const calls: Array<Record<string, unknown>> = [];
@@ -17,14 +18,6 @@ function fakeLogger(): { logger: Logger; calls: Array<Record<string, unknown>> }
     calls,
   };
 }
-
-const noopLogger: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  flush: async () => {},
-};
 
 let tmp: string;
 

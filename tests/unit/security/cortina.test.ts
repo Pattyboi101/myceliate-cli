@@ -101,7 +101,10 @@ describe('HitlGate.checkRead — sensitive path gating', () => {
     expect(requestApproval).not.toHaveBeenCalled();
   });
 
-  // Sensitive paths matrix — each pattern must trigger approval.
+  // Sensitive paths matrix — each pattern must trigger approval. One row per
+  // entry in SENSITIVE_READ_PATTERNS plus per-alternative coverage for the
+  // shell-startup and system-account regex groups (so a future regex tweak
+  // that drops .zshrc or shadow gets caught).
   it.each([
     ['/home/user/.ssh/id_rsa', 'SSH'],
     ['/home/user/.aws/credentials', 'AWS'],
@@ -111,8 +114,14 @@ describe('HitlGate.checkRead — sensitive path gating', () => {
     ['/home/user/.gnupg/private-keys-v1.d/abc.key', 'GPG'],
     ['/home/user/.netrc', '.netrc'],
     ['/home/user/.npmrc', 'npm'],
-    ['/home/user/.bashrc', 'shell startup'],
-    ['/etc/passwd', 'system account'],
+    ['/home/user/.pypirc', 'pypi'],
+    ['/home/user/.bashrc', 'shell startup — bashrc'],
+    ['/home/user/.zshrc', 'shell startup — zshrc'],
+    ['/home/user/.profile', 'shell startup — profile'],
+    ['/home/user/.bash_profile', 'shell startup — bash_profile'],
+    ['/home/user/.zprofile', 'shell startup — zprofile'],
+    ['/etc/passwd', 'system account — passwd'],
+    ['/etc/shadow', 'system account — shadow'],
     ['/etc/sudoers', 'sudo'],
     ['/proc/self/environ', 'process environment'],
   ])('requires approval for sensitive read of %s (%s)', async (path, _label) => {

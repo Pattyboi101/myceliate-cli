@@ -61,10 +61,11 @@ export type WriteCheck = { path: string; cwd: string; requestId: string };
 export type ReadCheck = { path: string; requestId: string };
 
 /**
- * Discriminated union result from `HitlGate.checkBash`.
+ * Discriminated union result from any `HitlGate` check method (checkBash,
+ * checkWrite, checkRead).
  *
- * - `{ allowed: true, requiredApproval: false }` — command passed the static blocklist.
- * - `{ allowed: true, requiredApproval: true }` — command was dangerous but the user approved.
+ * - `{ allowed: true, requiredApproval: false }` — operation passed the static gate (no prompt).
+ * - `{ allowed: true, requiredApproval: true }` — operation was risky but the user approved.
  * - `{ allowed: false, requiredApproval: true, feedback }` — user rejected; `feedback` is
  *   the rejection message (defaults to a generic string if the UI sent none).
  */
@@ -73,12 +74,16 @@ export type Verdict =
   | { allowed: false; requiredApproval: true; feedback: string };
 
 /**
- * HITL (Human-In-The-Loop) gate for bash command dispatch.
+ * HITL (Human-In-The-Loop) gate for orchestrator-initiated dangerous operations.
  *
- * Orchestrator (Phase 9) calls `checkBash` ahead of every bash dispatch.
- * If the command is safe, the method returns immediately. If it trips the
- * static blocklist, the method AWAITS `requestApproval` before resolving —
- * the calling dispatch path blocks until the user explicitly approves or rejects.
+ * Three check methods cover the v1.5 attack surface:
+ * - `checkBash` (Phase 9): static dangerous-pattern blocklist for shell commands.
+ * - `checkWrite` (v1.5 Cortina): cwd confinement for `write_file` dispatches.
+ * - `checkRead` (v1.5 Cortina): sensitive-path gating for `read_file` dispatches.
+ *
+ * If the operation is safe, each method returns immediately. If it trips its
+ * gate, the method AWAITS `requestApproval` before resolving — the calling
+ * dispatch path blocks until the user explicitly approves or rejects.
  *
  * This is intentional: execution must not proceed until the user says yes (R11).
  */
@@ -163,7 +168,11 @@ export class HitlGate {
     const response = await this.opts.requestApproval({
       requestId: input.requestId,
       command: `read_file → ${resolvedPath}`,
-      cwd: resolvedPath, // no separate cwd concept for reads; reuse the field
+      // Reads have no inherent cwd; pass a sentinel so the UI's "cwd:" label
+      // doesn't render the sensitive path itself (which would be misleading).
+      // v2 may introduce a discriminated ApprovalRequest with kind:'read' that
+      // omits cwd entirely, but that requires UI ApprovalPrompt changes.
+      cwd: '(n/a — read operation)',
       reason: `read sensitive path: ${sensitive.reason}`,
     });
     if (response.decision === 'approve') {

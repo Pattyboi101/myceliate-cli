@@ -30,7 +30,7 @@ describe('SporeRegistry.discover', () => {
       .list()
       .map((s) => s.name)
       .sort();
-    expect(names).toEqual(['alpha', 'beta', 'gamma']);
+    expect(names).toEqual(['alpha', 'beta', 'gamma', 'research']);
   });
 
   it('resolves overrides — project beats user beats bundled', async () => {
@@ -52,7 +52,7 @@ describe('SporeRegistry.discover', () => {
       { logger },
     );
     const descs = registry.getDescriptions();
-    expect(descs).toHaveLength(3);
+    expect(descs).toHaveLength(4);
     for (const d of descs) {
       expect(d.name).toMatch(/^[a-z]+$/);
       expect(d.description.length).toBeLessThanOrEqual(200);
@@ -77,6 +77,15 @@ describe('SporeRegistry.discover', () => {
       { logger },
     );
     expect(registry.list()).toEqual([]);
+  });
+});
+
+describe('SporeRegistry.empty', () => {
+  it('returns a registry with zero spores', () => {
+    const registry = SporeRegistry.empty();
+    expect(registry.list()).toEqual([]);
+    expect(registry.getDescriptions()).toEqual([]);
+    expect(registry.get('anything')).toBeUndefined();
   });
 });
 

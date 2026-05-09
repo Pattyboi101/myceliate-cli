@@ -15,6 +15,9 @@ export const SporeManifestSchema = z
       .regex(HEX_COLOR, 'accent_color must be a 6-digit hex string (e.g. "#c5a45f")'),
     keywords: z.array(z.string()).default([]),
     agents: z.array(z.string().regex(KEBAB, 'agent names must be kebab-case')).default([]),
+    allowed_tools: z
+      .array(z.string().min(1, 'allowed_tools entries must be non-empty strings'))
+      .optional(),
   })
   .strict();
 
@@ -39,8 +42,12 @@ export function parseSporeManifest(yamlContent: string): SporeManifest {
   }
   const result = SporeManifestSchema.safeParse(raw);
   if (!result.success) {
+    const issues = result.error.issues.map((i) => {
+      const pathPrefix = i.path.length > 0 ? `${i.path.join('.')}: ` : '';
+      return `${pathPrefix}${i.message}`;
+    });
     throw new SporeManifestParseError(
-      `Manifest validation failed: ${result.error.issues.map((i) => i.message).join('; ')}`,
+      `Manifest validation failed: ${issues.join('; ')}`,
       result.error,
     );
   }

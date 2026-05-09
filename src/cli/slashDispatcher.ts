@@ -39,7 +39,10 @@ export async function dispatch(input: string, ctx: DispatchContext): Promise<Dis
 
   const command = pack.commands.find((c) => c.name === commandName);
   if (!command) {
-    return { kind: 'orchestrator-output', text: `spore "${packName}" has no command "${commandName}"` };
+    return {
+      kind: 'orchestrator-output',
+      text: `spore "${packName}" has no command "${commandName}"`,
+    };
   }
 
   if (ctx.activeSpore !== packName) {

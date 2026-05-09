@@ -20,7 +20,11 @@ export interface SporeBootResult {
   germinatedSection: string;
 }
 
-export async function bootSpores(cwd: string, noSpore: boolean, logger?: Logger): Promise<SporeBootResult> {
+export async function bootSpores(
+  cwd: string,
+  noSpore: boolean,
+  logger?: Logger,
+): Promise<SporeBootResult> {
   const projectSporesDir = resolve(cwd, '.myceliate', 'skills');
   if (noSpore) {
     return {

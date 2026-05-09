@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { dispatch, type DispatchResult } from '../../../src/cli/slashDispatcher.js';
+import { describe, expect, it } from 'vitest';
+import { type DispatchResult, dispatch } from '../../../src/cli/slashDispatcher.js';
 import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import type { Logger } from '../../../src/util/logger.js';
 
@@ -14,7 +14,10 @@ const noopLogger: Logger = {
   flush: async () => {},
 };
 
-async function fixtureRegistry(): Promise<{ registry: SporeRegistry; cleanup: () => Promise<void> }> {
+async function fixtureRegistry(): Promise<{
+  registry: SporeRegistry;
+  cleanup: () => Promise<void>;
+}> {
   // Build a tmp tier with one pack + two commands on disk.
   const root = await mkdtemp(join(tmpdir(), 'myc-disp-'));
   const packDir = join(root, 'research');
@@ -72,7 +75,12 @@ describe('slashDispatcher.dispatch', () => {
   it('returns no-match for non-slash input', async () => {
     const { registry, cleanup } = await fixtureRegistry();
     try {
-      const r = await dispatch('hello world', { registry, activeSpore: null, cwd: '/tmp', logger: noopLogger });
+      const r = await dispatch('hello world', {
+        registry,
+        activeSpore: null,
+        cwd: '/tmp',
+        logger: noopLogger,
+      });
       expect(r.kind).toBe('no-match');
     } finally {
       await cleanup();
@@ -82,7 +90,12 @@ describe('slashDispatcher.dispatch', () => {
   it('returns no-match for /spore (handled by orchestrator built-ins, not dispatcher)', async () => {
     const { registry, cleanup } = await fixtureRegistry();
     try {
-      const r = await dispatch('/spore list', { registry, activeSpore: null, cwd: '/tmp', logger: noopLogger });
+      const r = await dispatch('/spore list', {
+        registry,
+        activeSpore: null,
+        cwd: '/tmp',
+        logger: noopLogger,
+      });
       // Pack-command regex does not match /spore (no colon). Falls through.
       expect(r.kind).toBe('no-match');
     } finally {
@@ -93,10 +106,12 @@ describe('slashDispatcher.dispatch', () => {
   it('expands a pack command body and substitutes $ARGUMENTS', async () => {
     const { registry, cleanup } = await fixtureRegistry();
     try {
-      const r = await dispatch(
-        '/research:lit-review graphene oxide membranes',
-        { registry, activeSpore: 'research', cwd: '/tmp', logger: noopLogger },
-      );
+      const r = await dispatch('/research:lit-review graphene oxide membranes', {
+        registry,
+        activeSpore: 'research',
+        cwd: '/tmp',
+        logger: noopLogger,
+      });
       expect(r.kind).toBe('expanded-prompt');
       if (r.kind !== 'expanded-prompt') throw new Error('type narrow');
       expect(r.body).toContain('Produce a lit review on: graphene oxide membranes');
@@ -109,10 +124,12 @@ describe('slashDispatcher.dispatch', () => {
   it('appends \\n\\n + raw args when $ARGUMENTS placeholder is absent', async () => {
     const { registry, cleanup } = await fixtureRegistry();
     try {
-      const r = await dispatch(
-        '/research:methodology-check foo bar',
-        { registry, activeSpore: 'research', cwd: '/tmp', logger: noopLogger },
-      );
+      const r = await dispatch('/research:methodology-check foo bar', {
+        registry,
+        activeSpore: 'research',
+        cwd: '/tmp',
+        logger: noopLogger,
+      });
       expect(r.kind).toBe('expanded-prompt');
       if (r.kind !== 'expanded-prompt') throw new Error('type narrow');
       expect(r.body).toContain('Check the methodology described below.');
@@ -125,10 +142,12 @@ describe('slashDispatcher.dispatch', () => {
   it('refuses with active-spore message when invoked pack is not the active spore', async () => {
     const { registry, cleanup } = await fixtureRegistry();
     try {
-      const r = await dispatch(
-        '/research:lit-review topic',
-        { registry, activeSpore: null, cwd: '/tmp', logger: noopLogger },
-      );
+      const r = await dispatch('/research:lit-review topic', {
+        registry,
+        activeSpore: null,
+        cwd: '/tmp',
+        logger: noopLogger,
+      });
       expect(r.kind).toBe('orchestrator-output');
       if (r.kind !== 'orchestrator-output') throw new Error('type narrow');
       expect(r.text).toMatch(/pin it first/i);
@@ -141,10 +160,12 @@ describe('slashDispatcher.dispatch', () => {
   it('reports pack-not-found', async () => {
     const { registry, cleanup } = await fixtureRegistry();
     try {
-      const r = await dispatch(
-        '/nonexistent:foo',
-        { registry, activeSpore: null, cwd: '/tmp', logger: noopLogger },
-      );
+      const r = await dispatch('/nonexistent:foo', {
+        registry,
+        activeSpore: null,
+        cwd: '/tmp',
+        logger: noopLogger,
+      });
       expect(r.kind).toBe('orchestrator-output');
       if (r.kind !== 'orchestrator-output') throw new Error('type narrow');
       expect(r.text).toContain('no spore named "nonexistent"');
@@ -156,10 +177,12 @@ describe('slashDispatcher.dispatch', () => {
   it('reports command-not-found', async () => {
     const { registry, cleanup } = await fixtureRegistry();
     try {
-      const r = await dispatch(
-        '/research:nonexistent',
-        { registry, activeSpore: 'research', cwd: '/tmp', logger: noopLogger },
-      );
+      const r = await dispatch('/research:nonexistent', {
+        registry,
+        activeSpore: 'research',
+        cwd: '/tmp',
+        logger: noopLogger,
+      });
       expect(r.kind).toBe('orchestrator-output');
       if (r.kind !== 'orchestrator-output') throw new Error('type narrow');
       expect(r.text).toContain('has no command "nonexistent"');
@@ -176,10 +199,12 @@ describe('slashDispatcher.dispatch', () => {
     };
     const { registry, cleanup } = await fixtureRegistry();
     try {
-      await dispatch(
-        '/research:lit-review topic',
-        { registry, activeSpore: 'research', cwd: '/tmp', logger: auditLogger },
-      );
+      await dispatch('/research:lit-review topic', {
+        registry,
+        activeSpore: 'research',
+        cwd: '/tmp',
+        logger: auditLogger,
+      });
       const dispatched = events.find((e) => e.event === 'slash_dispatched');
       expect(dispatched).toMatchObject({
         event: 'slash_dispatched',

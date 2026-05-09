@@ -1,5 +1,5 @@
 // tests/unit/runtime/replSession.test.ts
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -153,7 +153,10 @@ describe('runReplSession', () => {
 });
 
 describe('replSession slash dispatcher routing', () => {
-  async function buildFixtureRegistry(): Promise<{ registry: SporeRegistry; cleanup: () => Promise<void> }> {
+  async function buildFixtureRegistry(): Promise<{
+    registry: SporeRegistry;
+    cleanup: () => Promise<void>;
+  }> {
     const root = await mkdtemp(join(tmpdir(), 'myc-repl-disp-'));
     const packDir = join(root, 'research');
     await mkdir(join(packDir, 'commands'), { recursive: true });

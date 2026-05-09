@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { composeSystemSections } from '../../../src/orchestrator/composeSystemSections.js';
-import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import type { CommandRecord } from '../../../src/spores/CommandRecord.js';
 import type { Spore } from '../../../src/spores/Spore.js';
+import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 
 function fakeRegistry(spores: Spore[]): SporeRegistry {
   return SporeRegistry.fromList(spores);
 }
 
-function mkSpore(name: string, opts: { description: string; accent_color: string; commands?: CommandRecord[] }): Spore {
+function mkSpore(
+  name: string,
+  opts: { description: string; accent_color: string; commands?: CommandRecord[] },
+): Spore {
   return {
     name,
     tier: 'bundled',
@@ -47,9 +50,7 @@ describe('composeSystemSections', () => {
       mkSpore('research', {
         description: 'Academic research workflows.',
         accent_color: '#4a90c4',
-        commands: [
-          { name: 'lit-review', description: 'lit review', bodyPath: '/fake/lit.md' },
-        ],
+        commands: [{ name: 'lit-review', description: 'lit review', bodyPath: '/fake/lit.md' }],
       }),
     ]);
     const out = composeSystemSections({ registry: reg, activeSpore: null });
@@ -69,7 +70,9 @@ describe('composeSystemSections', () => {
       mkSpore('coding', {
         description: 'Coding.',
         accent_color: '#7d9b3d',
-        commands: [{ name: 'scaffold', description: 'Scaffold a new module.', bodyPath: '/fake/sc.md' }],
+        commands: [
+          { name: 'scaffold', description: 'Scaffold a new module.', bodyPath: '/fake/sc.md' },
+        ],
       }),
     ]);
     const out = composeSystemSections({ registry: reg, activeSpore: 'research' });

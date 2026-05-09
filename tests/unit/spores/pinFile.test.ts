@@ -70,7 +70,9 @@ describe('pinFile Logger DI', () => {
       const { logger, calls } = fakeLogger();
       const result = await readPin(cwd, logger);
       expect(result).toBeNull();
-      expect(calls.some((c) => c.event === 'pin_invalid_name' && c.name === 'INVALID NAME!')).toBe(true);
+      expect(calls.some((c) => c.event === 'pin_invalid_name' && c.name === 'INVALID NAME!')).toBe(
+        true,
+      );
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

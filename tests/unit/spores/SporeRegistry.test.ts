@@ -6,7 +6,11 @@ import type { Logger } from '../../../src/util/logger.js';
 
 const fixtures = resolve(__dirname, '../../fixtures/spores');
 
-function fakeLogger(): { logger: Logger; warn: (e: Record<string, unknown>) => void; calls: Array<Record<string, unknown>> } {
+function fakeLogger(): {
+  logger: Logger;
+  warn: (e: Record<string, unknown>) => void;
+  calls: Array<Record<string, unknown>>;
+} {
   const calls: Array<Record<string, unknown>> = [];
   const warn = (e: Record<string, unknown>): void => {
     calls.push(e);
@@ -23,7 +27,11 @@ describe('SporeRegistry.discover', () => {
   it('discovers spores across all three tiers', async () => {
     const { logger } = fakeLogger();
     const registry = await SporeRegistry.discover(
-      { bundledDir: `${fixtures}/bundled`, userDir: `${fixtures}/user`, projectDir: `${fixtures}/project` },
+      {
+        bundledDir: `${fixtures}/bundled`,
+        userDir: `${fixtures}/user`,
+        projectDir: `${fixtures}/project`,
+      },
       { logger },
     );
     const names = registry
@@ -36,7 +44,11 @@ describe('SporeRegistry.discover', () => {
   it('resolves overrides — project beats user beats bundled', async () => {
     const { logger } = fakeLogger();
     const registry = await SporeRegistry.discover(
-      { bundledDir: `${fixtures}/bundled`, userDir: `${fixtures}/user`, projectDir: `${fixtures}/project` },
+      {
+        bundledDir: `${fixtures}/bundled`,
+        userDir: `${fixtures}/user`,
+        projectDir: `${fixtures}/project`,
+      },
       { logger },
     );
     const alpha = registry.get('alpha');
@@ -48,7 +60,11 @@ describe('SporeRegistry.discover', () => {
   it('exposes only frontmatter descriptions in getDescriptions()', async () => {
     const { logger } = fakeLogger();
     const registry = await SporeRegistry.discover(
-      { bundledDir: `${fixtures}/bundled`, userDir: `${fixtures}/user`, projectDir: `${fixtures}/project` },
+      {
+        bundledDir: `${fixtures}/bundled`,
+        userDir: `${fixtures}/user`,
+        projectDir: `${fixtures}/project`,
+      },
       { logger },
     );
     const descs = registry.getDescriptions();
@@ -64,7 +80,11 @@ describe('SporeRegistry.discover', () => {
     const { logger } = fakeLogger();
     // Bad spore at user/badspore: missing myceliate.yaml — registry must skip cleanly.
     const registry = await SporeRegistry.discover(
-      { bundledDir: `${fixtures}/bundled`, userDir: `${fixtures}/user`, projectDir: `${fixtures}/project` },
+      {
+        bundledDir: `${fixtures}/bundled`,
+        userDir: `${fixtures}/user`,
+        projectDir: `${fixtures}/project`,
+      },
       { logger },
     );
     expect(registry.list().some((s) => s.name === 'badspore')).toBe(false);
@@ -73,7 +93,11 @@ describe('SporeRegistry.discover', () => {
   it('returns empty registry when all tiers are missing', async () => {
     const { logger } = fakeLogger();
     const registry = await SporeRegistry.discover(
-      { bundledDir: '/nonexistent/bundled', userDir: '/nonexistent/user', projectDir: '/nonexistent/project' },
+      {
+        bundledDir: '/nonexistent/bundled',
+        userDir: '/nonexistent/user',
+        projectDir: '/nonexistent/project',
+      },
       { logger },
     );
     expect(registry.list()).toEqual([]);

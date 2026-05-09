@@ -57,7 +57,11 @@ describe('SporeRegistry commands discovery', () => {
   it('warns and skips when filename basename does not match frontmatter name', async () => {
     const { logger, calls } = fakeLogger();
     await SporeRegistry.discover(
-      { bundledDir: `${fixtures}/bundled-mismatch`, userDir: '/nonexistent', projectDir: '/nonexistent' },
+      {
+        bundledDir: `${fixtures}/bundled-mismatch`,
+        userDir: '/nonexistent',
+        projectDir: '/nonexistent',
+      },
       { logger },
     );
     expect(calls.some((c) => c.event === 'command_filename_mismatch')).toBe(true);
@@ -66,7 +70,11 @@ describe('SporeRegistry commands discovery', () => {
   it('warns and skips when frontmatter is malformed', async () => {
     const { logger, calls } = fakeLogger();
     await SporeRegistry.discover(
-      { bundledDir: `${fixtures}/bundled-malformed`, userDir: '/nonexistent', projectDir: '/nonexistent' },
+      {
+        bundledDir: `${fixtures}/bundled-malformed`,
+        userDir: '/nonexistent',
+        projectDir: '/nonexistent',
+      },
       { logger },
     );
     expect(calls.some((c) => c.event === 'command_load_skipped')).toBe(true);

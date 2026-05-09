@@ -95,7 +95,12 @@ export class SporeRegistry {
     return out;
   }
 
-  private static async loadSpore(tier: SporeTier, dir: string, name: string, logger: Logger): Promise<Spore> {
+  private static async loadSpore(
+    tier: SporeTier,
+    dir: string,
+    name: string,
+    logger: Logger,
+  ): Promise<Spore> {
     const manifestPath = join(dir, 'myceliate.yaml');
     const sectorSkillPath = join(dir, 'SKILL.md');
     const manifestRaw = await readFile(manifestPath, 'utf8');
@@ -132,7 +137,11 @@ export class SporeRegistry {
     return { name, tier, dir, manifest, sectorFrontmatter, sectorSkillPath, personas, commands };
   }
 
-  private static async loadCommands(dir: string, sporeName: string, logger: Logger): Promise<CommandRecord[]> {
+  private static async loadCommands(
+    dir: string,
+    sporeName: string,
+    logger: Logger,
+  ): Promise<CommandRecord[]> {
     const commandsDir = join(dir, 'commands');
     let commandEntries: import('node:fs').Dirent[];
     try {
@@ -161,7 +170,9 @@ export class SporeRegistry {
           });
           continue;
         }
-        const argumentHint = (frontmatter as Record<string, unknown>)['argument-hint'] as string | undefined;
+        const argumentHint = (frontmatter as Record<string, unknown>)['argument-hint'] as
+          | string
+          | undefined;
         out.push({
           name: frontmatter.name,
           description: frontmatter.description,

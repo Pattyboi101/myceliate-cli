@@ -3,11 +3,22 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { HitlGate } from '../../../src/security/hitlGate.js';
 import { grepTool } from '../../../src/tools/grep.js';
 import { listDirTool } from '../../../src/tools/listDir.js';
-import { readFileTool } from '../../../src/tools/readFile.js';
+import { createReadFileTool } from '../../../src/tools/readFile.js';
 import { ToolRegistry } from '../../../src/tools/registry.js';
-import { writeFileTool } from '../../../src/tools/writeFile.js';
+import { createWriteFileTool } from '../../../src/tools/writeFile.js';
+
+// v1.5 Cortina: file tools now require a HitlGate. These tests focus on the
+// underlying file IO behaviour (read/write/grep correctness), so we use an
+// auto-approving stub gate. Cortina-specific tests (cwd-confinement,
+// sensitive-path gating) live in the new tests/unit/security/cortina.test.ts.
+const allowAllHitl = new HitlGate({
+  requestApproval: async () => ({ decision: 'approve' }),
+});
+const readFileTool = createReadFileTool({ hitl: allowAllHitl });
+const writeFileTool = createWriteFileTool({ hitl: allowAllHitl });
 
 let tmp: string;
 

@@ -1,5 +1,32 @@
 // src/security/hitlGate.ts
+import { isAbsolute, resolve, sep } from 'node:path';
 import { isDangerous } from './dangerousPatterns.js';
+
+/**
+ * v1.5 Cortina: paths considered sensitive enough to require HITL approval before
+ * the file tools may read them. Matched against the resolved absolute path.
+ *
+ * The list errs on the side of false positives — a benign read of `~/.bashrc`
+ * during a legit task is annoying; a silent leak of `~/.aws/credentials` is
+ * a security incident. The user can approve-once for legitimate reads.
+ *
+ * v2: extend with corporate-creds patterns (cloud SDK caches, IDE settings),
+ * symlink-resolution, and per-Spore allowlist overrides.
+ */
+const SENSITIVE_READ_PATTERNS: { re: RegExp; reason: string }[] = [
+  { re: /(?:^|\/)\.ssh(?:\/|$)/, reason: 'SSH config / private keys directory' },
+  { re: /(?:^|\/)\.aws(?:\/|$)/, reason: 'AWS credentials directory' },
+  { re: /(?:^|\/)\.config\/gcloud(?:\/|$)/, reason: 'GCP credentials directory' },
+  { re: /(?:^|\/)\.kube\/config$/, reason: 'Kubernetes cluster credentials' },
+  { re: /(?:^|\/)\.docker\/config\.json$/, reason: 'Docker registry credentials' },
+  { re: /(?:^|\/)\.gnupg(?:\/|$)/, reason: 'GPG keyring' },
+  { re: /(?:^|\/)\.netrc$/, reason: 'generic .netrc credentials' },
+  { re: /(?:^|\/)\.npmrc$/, reason: 'npm registry tokens' },
+  { re: /(?:^|\/)\.pypirc$/, reason: 'PyPI tokens' },
+  { re: /(?:^|\/)\.(?:bashrc|zshrc|profile|bash_profile|zprofile)$/, reason: 'shell startup file' },
+  { re: /^\/etc\/(?:passwd|shadow|sudoers)/, reason: 'system account / sudo config' },
+  { re: /^\/proc\/self\/environ$/, reason: 'process environment (often leaks credentials)' },
+];
 
 /** The payload sent to the approval UI when a dangerous command is intercepted. */
 export type ApprovalRequest = {
@@ -26,6 +53,12 @@ export type ApprovalRequester = (req: ApprovalRequest) => Promise<ApprovalRespon
 
 /** Input shape for `HitlGate.checkBash`. */
 export type BashCheck = { command: string; cwd: string; requestId: string };
+
+/** Input shape for `HitlGate.checkWrite` (v1.5 Cortina). */
+export type WriteCheck = { path: string; cwd: string; requestId: string };
+
+/** Input shape for `HitlGate.checkRead` (v1.5 Cortina). */
+export type ReadCheck = { path: string; requestId: string };
 
 /**
  * Discriminated union result from `HitlGate.checkBash`.
@@ -64,6 +97,75 @@ export class HitlGate {
       reason: v.reason,
     });
 
+    if (response.decision === 'approve') {
+      return { allowed: true, requiredApproval: true };
+    }
+    return {
+      allowed: false,
+      requiredApproval: true,
+      feedback: response.feedback ?? 'rejected without feedback',
+    };
+  }
+
+  /**
+   * v1.5 Cortina: gate write_file dispatches.
+   *
+   * Allowed when the resolved write path stays inside the orchestrator's cwd.
+   * Otherwise the user is prompted to approve / reject — preventing prompt-
+   * injected writes to ~/.ssh/authorized_keys, ~/.bashrc, /etc/..., etc.
+   *
+   * R11 explicitly mandates HITL on "any write outside cwd". The approval
+   * payload reuses the bash-shaped ApprovalRequest with the `command` field
+   * carrying a "write_file → <path>" description; the UI ApprovalPrompt
+   * already renders this as a labelled approval. v2 may introduce a
+   * discriminated ApprovalRequest union with dedicated `kind: 'write'`
+   * rendering, but that is UI work outside Cortina's scope.
+   */
+  async checkWrite(input: WriteCheck): Promise<Verdict> {
+    const resolvedPath = isAbsolute(input.path)
+      ? resolve(input.path)
+      : resolve(input.cwd, input.path);
+    const resolvedCwd = resolve(input.cwd);
+    const insideCwd = resolvedPath === resolvedCwd || resolvedPath.startsWith(resolvedCwd + sep);
+    if (insideCwd) return { allowed: true, requiredApproval: false };
+
+    const response = await this.opts.requestApproval({
+      requestId: input.requestId,
+      command: `write_file → ${resolvedPath}`,
+      cwd: resolvedCwd,
+      reason: `write outside cwd (${resolvedCwd})`,
+    });
+    if (response.decision === 'approve') {
+      return { allowed: true, requiredApproval: true };
+    }
+    return {
+      allowed: false,
+      requiredApproval: true,
+      feedback: response.feedback ?? 'rejected without feedback',
+    };
+  }
+
+  /**
+   * v1.5 Cortina: gate read_file dispatches that target a sensitive path.
+   *
+   * Match against SENSITIVE_READ_PATTERNS (SSH/AWS/GCP/k8s/GPG/.netrc/shell
+   * startup/system accounts/process env). Hit → require user approval.
+   * Non-match → allowed silently. The asymmetry vs checkWrite is deliberate:
+   * blanket-gating every read would prompt-storm the user during normal code
+   * exploration, while writes to anywhere outside cwd are inherently rare and
+   * worth gating universally.
+   */
+  async checkRead(input: ReadCheck): Promise<Verdict> {
+    const resolvedPath = resolve(input.path);
+    const sensitive = SENSITIVE_READ_PATTERNS.find((p) => p.re.test(resolvedPath));
+    if (!sensitive) return { allowed: true, requiredApproval: false };
+
+    const response = await this.opts.requestApproval({
+      requestId: input.requestId,
+      command: `read_file → ${resolvedPath}`,
+      cwd: resolvedPath, // no separate cwd concept for reads; reuse the field
+      reason: `read sensitive path: ${sensitive.reason}`,
+    });
     if (response.decision === 'approve') {
       return { allowed: true, requiredApproval: true };
     }

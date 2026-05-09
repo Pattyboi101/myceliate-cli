@@ -93,10 +93,7 @@ export function createBashTool(deps: BashToolDeps): Tool<BashInput> {
       });
       deps.worker.trackJob(toolUseId, crashReject);
       try {
-        const result = await Promise.race([
-          job.waitUntilFinished(deps.queueEvents),
-          crashPromise,
-        ]);
+        const result = await Promise.race([job.waitUntilFinished(deps.queueEvents), crashPromise]);
         return formatResult(result);
       } finally {
         deps.worker.releaseJob(toolUseId);

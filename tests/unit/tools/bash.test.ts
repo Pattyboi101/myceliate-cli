@@ -1,9 +1,9 @@
 // tests/unit/tools/bash.test.ts
 import { describe, expect, it, vi } from 'vitest';
 import { WorkerCrashedError } from '../../../src/runtime/workerLifecycle.js';
+import { HitlGate } from '../../../src/security/hitlGate.js';
 import type { BashToolDeps } from '../../../src/tools/bash.js';
 import { createBashTool } from '../../../src/tools/bash.js';
-import { HitlGate } from '../../../src/security/hitlGate.js';
 
 const stubWorker: BashToolDeps['worker'] = {
   child: {} as never,
@@ -116,7 +116,12 @@ describe('bash tool — worker crash detection', () => {
     const releaseJob = vi.fn();
 
     const fakeJob = {
-      waitUntilFinished: vi.fn(() => new Promise(() => {/* never resolves */})),
+      waitUntilFinished: vi.fn(
+        () =>
+          new Promise(() => {
+            /* never resolves */
+          }),
+      ),
     };
 
     const deps: BashToolDeps = {
@@ -133,10 +138,10 @@ describe('bash tool — worker crash detection', () => {
     };
 
     const tool = createBashTool(deps);
-    const dispatchPromise = tool.run(
-      { command: 'echo hi', cwd: '', timeoutMs: 0 },
-      { cwd: '/tmp', toolUseId: 'test-id' } as never,
-    );
+    const dispatchPromise = tool.run({ command: 'echo hi', cwd: '', timeoutMs: 0 }, {
+      cwd: '/tmp',
+      toolUseId: 'test-id',
+    } as never);
 
     // Simulate worker crash by invoking the registered rejecter
     setTimeout(() => registeredReject(new WorkerCrashedError(1, null)), 5);

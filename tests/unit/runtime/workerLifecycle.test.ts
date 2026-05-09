@@ -7,10 +7,7 @@ vi.mock('node:fs');
 
 import * as childProcess from 'node:child_process';
 import * as connection from '../../../src/queue/connection.js';
-import {
-  RedisUnavailableError,
-  WorkerCrashedError,
-} from '../../../src/runtime/workerLifecycle.js';
+import { RedisUnavailableError, WorkerCrashedError } from '../../../src/runtime/workerLifecycle.js';
 
 const mockLogger = {
   info: vi.fn(),
@@ -66,7 +63,11 @@ describe('workerLifecycle — Redis pre-flight', () => {
 
     const { startWorker } = await import('../../../src/runtime/workerLifecycle.js');
     await expect(
-      startWorker({ redisUrl: 'redis://localhost:6379', logger: mockLogger, logsDir: '/tmp/test-logs' }),
+      startWorker({
+        redisUrl: 'redis://localhost:6379',
+        logger: mockLogger,
+        logsDir: '/tmp/test-logs',
+      }),
     ).rejects.toThrow(/Redis is required for bash execution/);
   });
 
@@ -214,7 +215,9 @@ describe('workerLifecycle — crash detection', () => {
       exitCode: null,
     } as never);
 
-    const { startWorker, WorkerCrashedError } = await import('../../../src/runtime/workerLifecycle.js');
+    const { startWorker, WorkerCrashedError } = await import(
+      '../../../src/runtime/workerLifecycle.js'
+    );
     const handle = await startWorker({
       redisUrl: 'redis://localhost:6379',
       logger: mockLogger,

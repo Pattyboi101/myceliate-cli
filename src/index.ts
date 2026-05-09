@@ -188,11 +188,11 @@ async function main(): Promise<void> {
 
   const queue = bashQueue();
   const queueEvents = new QueueEvents('bash', { connection: getRedis() });
-  const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';   // matches connection.ts:22 default
+  const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379'; // matches connection.ts:22 default
   const worker = await startWorker({
     redisUrl,
     logger,
-    logsDir: join(ctx.memoryDir, 'logs'),   // matches createLogger usage at index.ts:63
+    logsDir: join(ctx.memoryDir, 'logs'), // matches createLogger usage at index.ts:63
   });
 
   // Phase 23: bootTools extracts the tool registration block from index.ts and
@@ -202,7 +202,7 @@ async function main(): Promise<void> {
     hitl,
     queue,
     queueEvents,
-    worker,                         // v1.5 Task 7: thread WorkerHandle for crash detection
+    worker, // v1.5 Task 7: thread WorkerHandle for crash detection
     registry: spores.registry,
     cwd,
     logger,

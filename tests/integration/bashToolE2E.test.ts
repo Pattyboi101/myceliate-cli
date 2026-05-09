@@ -5,8 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { redisConnectionOptions } from '../../src/queue/connection.js';
 import { runBashJob } from '../../src/queue/jobs/bashJob.js';
 import { type BashJobData, type BashJobReturn, QUEUE_NAMES } from '../../src/queue/queues.js';
-import type { BashToolDeps } from '../../src/tools/bash.js';
 import { HitlGate } from '../../src/security/hitlGate.js';
+import type { BashToolDeps } from '../../src/tools/bash.js';
 import { createBashTool } from '../../src/tools/bash.js';
 
 // Stub worker: E2E tests run a real BullMQ Worker (not the lifecycle-managed one),
@@ -69,7 +69,13 @@ describe.skipIf(!process.env.REDIS_URL && !process.env.MYC_REDIS_E2E)(
       const hitl = new HitlGate({
         requestApproval: async () => ({ decision: 'approve' }),
       });
-      const tool = createBashTool({ hitl, queue, queueEvents, worker: stubWorker, defaultTimeoutMs: 5_000 });
+      const tool = createBashTool({
+        hitl,
+        queue,
+        queueEvents,
+        worker: stubWorker,
+        defaultTimeoutMs: 5_000,
+      });
       const out = await tool.run(
         { command: 'echo myceliate' },
         { cwd: process.cwd(), abort: new AbortController().signal },
@@ -82,7 +88,13 @@ describe.skipIf(!process.env.REDIS_URL && !process.env.MYC_REDIS_E2E)(
       const hitl = new HitlGate({
         requestApproval: async () => ({ decision: 'approve' }),
       });
-      const tool = createBashTool({ hitl, queue, queueEvents, worker: stubWorker, defaultTimeoutMs: 5_000 });
+      const tool = createBashTool({
+        hitl,
+        queue,
+        queueEvents,
+        worker: stubWorker,
+        defaultTimeoutMs: 5_000,
+      });
       const out = await tool.run(
         { command: 'sh -c "exit 7"' },
         { cwd: process.cwd(), abort: new AbortController().signal },

@@ -3,7 +3,6 @@ import type { Queue, QueueEvents } from 'bullmq';
 import { z } from 'zod';
 import type { BashJobData, BashJobReturn } from '../queue/queues.js';
 import type { HitlGate } from '../security/hitlGate.js';
-import type { WorkerHandle } from './workerLifecycle.js';
 import type { SporeRegistry } from '../spores/SporeRegistry.js';
 import { childProcessSpawn } from '../spores/childProcessSpawn.js';
 import { createBashTool } from '../tools/bash.js';
@@ -15,6 +14,7 @@ import { ToolRegistry } from '../tools/registry.js';
 import { createSpawnSubagentTool } from '../tools/spawn_subagent.js';
 import { writeFileTool } from '../tools/writeFile.js';
 import type { Logger } from '../util/logger.js';
+import type { WorkerHandle } from './workerLifecycle.js';
 
 export interface BootToolsOpts {
   hitl: HitlGate;

@@ -102,7 +102,12 @@ export async function startWorker(opts: {
     }
     if (code !== 0 || pendingJobs.size > 0) {
       const pendingIds = [...pendingJobs.keys()];
-      opts.logger.error({ event: 'worker_crashed', exitCode: code, signal, pendingJobs: pendingIds });
+      opts.logger.error({
+        event: 'worker_crashed',
+        exitCode: code,
+        signal,
+        pendingJobs: pendingIds,
+      });
       const err = new WorkerCrashedError(code, signal);
       for (const reject of pendingJobs.values()) {
         reject(err);

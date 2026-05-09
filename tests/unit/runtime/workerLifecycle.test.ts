@@ -106,6 +106,28 @@ describe('workerLifecycle — Redis pre-flight', () => {
       }),
     );
   });
+
+  it('spawns the worker with cwd anchored to the myceliate-cli root, not the user cwd', async () => {
+    vi.spyOn(connection, 'getRedis').mockReturnValue({
+      ping: vi.fn().mockResolvedValue('PONG'),
+    } as never);
+
+    const { startWorker } = await import('../../../src/runtime/workerLifecycle.js');
+    await startWorker({
+      redisUrl: 'redis://localhost:6379',
+      logger: mockLogger,
+      logsDir: '/tmp/test-logs',
+    });
+
+    // cwd must point at a directory that contains package.json — otherwise
+    // `pnpm queue:worker` errors with ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND.
+    // We don't hardcode the absolute path (varies per checkout) — assert it
+    // ends with `myceliate-cli` so a future move of workerLifecycle.ts up/down
+    // the tree breaks this test loudly.
+    const spawnCall = (childProcess.spawn as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const opts = spawnCall?.[2] as { cwd?: string };
+    expect(opts.cwd).toMatch(/myceliate-cli\/?$/);
+  });
 });
 
 describe('workerLifecycle — stdio routing', () => {

@@ -1,5 +1,6 @@
 import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { Message } from '../adapters/messages.js';
+import { roleToModel } from '../runtime/roleToModel.js';
 import { HitlGate } from '../security/hitlGate.js';
 import { grepTool } from '../tools/grep.js';
 import { listDirTool } from '../tools/listDir.js';
@@ -62,7 +63,7 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
     let assistantText = '';
     const toolCalls: Array<{ id: string; name: string; args: unknown }> = [];
     for await (const event of client.stream({
-      model: process.env.DEEPSEEK_MODEL ?? 'deepseek-reasoner',
+      model: roleToModel('subagent'),
       messages,
       tools,
       thinking: false,
@@ -81,8 +82,7 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
     }
     for (const call of toolCalls) {
       let resultContent: string;
-      // TODO(v1.4): rename to avoid shadowing isError import from streamEvent.ts
-      let isError = false;
+      let toolErrored = false;
       try {
         resultContent = await registry.invoke(call.name, call.args, {
           cwd: process.cwd(),
@@ -91,14 +91,14 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
         });
       } catch (err) {
         resultContent = err instanceof Error ? err.message : String(err);
-        isError = true;
+        toolErrored = true;
       }
       messages.push({
         role: 'tool',
         result: {
           tool_use_id: call.id,
           command: call.name,
-          is_error: isError,
+          is_error: toolErrored,
           content: resultContent,
         },
       });

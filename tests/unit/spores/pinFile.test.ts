@@ -61,6 +61,31 @@ describe('pin file IO', () => {
   });
 });
 
+describe('clearPin no-prior-pin', () => {
+  // Phase 24 Task 3: closes test gap C from Phase 21. /spore unpin against a
+  // session with no pre-existing pin should complete silently — clearPin's
+  // ENOENT branch (src/spores/pinFile.ts:43-44) catches missing-file but was
+  // not directly asserted. The 'clears a pin' test above covers the post-pin
+  // path; this covers the no-prior-pin path.
+  it('completes silently when no pin file exists (ENOENT)', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'myc-clearpin-noprior-'));
+    try {
+      await expect(clearPin(cwd, noopLogger)).resolves.toBeUndefined();
+      // And idempotent: calling again on the same empty cwd is also silent.
+      await expect(clearPin(cwd, noopLogger)).resolves.toBeUndefined();
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  // NOTE: the 'throws on non-ENOENT errors' branch (src/spores/pinFile.ts:44
+  // re-throw) is intentionally NOT covered here. Reliably forcing a non-ENOENT
+  // error from `unlink` on a Linux tmp filesystem mid-test (e.g., EACCES,
+  // EISDIR) requires either fs mocking or chmod games that introduce flake
+  // risk between local and CI runs. The plan explicitly permits skipping this
+  // branch — the ENOENT path is the load-bearing user-facing behaviour.
+});
+
 describe('pinFile Logger DI', () => {
   it('emits warn event when pin file contains invalid name', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'myc-pin-'));

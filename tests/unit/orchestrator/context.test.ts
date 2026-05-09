@@ -106,7 +106,7 @@ describe('buildSystemPrompt', () => {
   // F5: gitStatus and dirEntries are now wired into the system prompt as
   // session ground truth. Previously senseContext populated them on every
   // session start but src/index.ts only consumed claudeMd + memoryDir.
-  it('includes git porcelain output and cwd entries in the assembled prompt', () => {
+  it('includes cwd, git porcelain output, and cwd entries in the assembled prompt', () => {
     const prompt = buildSystemPrompt({
       cwd: '/tmp/x',
       claudeMd: '# project rules',
@@ -116,6 +116,9 @@ describe('buildSystemPrompt', () => {
     });
     expect(prompt).toContain('# project rules');
     expect(prompt).toContain('## session ground truth');
+    // cwd path itself anchors absolute-path tool calls — without it the model
+    // hallucinates Docker defaults like /home/user and /workspace.
+    expect(prompt).toContain('cwd: /tmp/x');
     expect(prompt).toContain('git status:');
     expect(prompt).toContain(' M src/foo.ts');
     expect(prompt).toContain('?? new.ts');
@@ -131,6 +134,7 @@ describe('buildSystemPrompt', () => {
       dirEntries: [],
     });
     expect(prompt).toContain('You are myceliate, an autonomous CLI agent.');
+    expect(prompt).toContain('cwd: /tmp/x');
     // Empty git status renders as the explicit "(clean / not a repo)" hint.
     expect(prompt).toContain('(clean / not a repo)');
     expect(prompt).toContain('cwd entries: ');

@@ -183,6 +183,87 @@ it('renders ToolCallCard for each entry in state.toolCalls', () => {
   expect(lastFrame()).toContain('foo.ts');
 });
 
+describe('GerminationCard mid-stream collapse', () => {
+  // Phase 24 Task 1: closes spec §7.2 deviation flagged in v1.3 Phase 21
+  // plan-pointer note. Card collapses to a one-line summary on the first
+  // content_delta event (i.e. once `state.content.length > 0`), instead of
+  // persisting the full bordered banner until `turn_complete`. Also closes
+  // test gap A from Phase 21 (App.tsx GerminationCard render-path coverage).
+  const banner = { model: 'deepseek-chat', adapter: 'v3' as const, cwd: '/tmp' };
+
+  it('renders the full bordered card while no content has streamed', () => {
+    const state: AppState = {
+      userInput: 'go',
+      reasoning: null,
+      content: '',
+      approvalRequests: [],
+      phase: 'streaming',
+      turns: [],
+      toolCalls: [],
+      activeSpore: { name: 'research', accent_color: '#4a90c4' },
+      germinationCard: { name: 'research', accent_color: '#4a90c4' },
+      bootWarnings: [],
+    };
+    const { lastFrame } = render(<App state={state} banner={banner} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('research');
+    expect(frame).toMatch(/Germinating/i);
+    // Pre-stream: full bordered banner is present.
+    expect(frame).toMatch(/[╭─╮│╰╯┌─┐└┘]/);
+  });
+
+  it('collapses to one-line summary once content streaming begins', () => {
+    const state: AppState = {
+      userInput: 'go',
+      reasoning: null,
+      content: 'The first chunk of model response...',
+      approvalRequests: [],
+      phase: 'streaming',
+      turns: [],
+      toolCalls: [],
+      activeSpore: { name: 'research', accent_color: '#4a90c4' },
+      germinationCard: { name: 'research', accent_color: '#4a90c4' },
+      bootWarnings: [],
+    };
+    const { lastFrame } = render(<App state={state} banner={banner} />);
+    const frame = lastFrame() ?? '';
+    // Collapsed marker (▸) plus the spore name.
+    expect(frame).toContain('research');
+    expect(frame).toContain('▸');
+    // Streamed content is still visible.
+    expect(frame).toContain('The first chunk');
+    // Crucially: no bordered banner around the germination message.
+    // We isolate the GerminationCard region by checking it does NOT contain
+    // the "Germinating" message inside a single-border banner. A Box border
+    // surrounds the message with horizontal rule chars on the surrounding
+    // lines; the collapsed form has no such surrounding border for the card.
+    // Heuristic: the frame contains at most one bordered region (the
+    // InputBox is hidden during streaming, banner has no border, turns log
+    // has no border). After collapse there should be NO single-line border.
+    expect(frame).not.toMatch(/┌─+┐/);
+    expect(frame).not.toMatch(/└─+┘/);
+  });
+
+  it('hides the germination card entirely when germinationCard is null', () => {
+    const state: AppState = {
+      userInput: 'go',
+      reasoning: null,
+      content: 'partial',
+      approvalRequests: [],
+      phase: 'streaming',
+      turns: [],
+      toolCalls: [],
+      activeSpore: null,
+      germinationCard: null,
+      bootWarnings: [],
+    };
+    const { lastFrame } = render(<App state={state} banner={banner} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).not.toContain('▸ research');
+    expect(frame).not.toMatch(/Germinating/);
+  });
+});
+
 it('expands the most recent ToolCallCard when Tab is pressed (after reasoning toggle precedence)', async () => {
   const state: AppState = {
     userInput: 'go',

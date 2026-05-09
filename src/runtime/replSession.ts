@@ -3,7 +3,12 @@ import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { Message } from '../adapters/messages.js';
 import type { StreamEvent } from '../adapters/streamEvent.js';
 import { dispatch } from '../cli/slashDispatcher.js';
-import { handleSporeList, handleSporePin, handleSporeUnpin } from '../cli/sporeSlashCommands.js';
+import {
+  handleSporeList,
+  handleSporePin,
+  handleSporeTools,
+  handleSporeUnpin,
+} from '../cli/sporeSlashCommands.js';
 import { QueryEngine } from '../orchestrator/QueryEngine.js';
 import { runReactLoop } from '../orchestrator/reactLoop.js';
 import type { SporeRegistry } from '../spores/SporeRegistry.js';
@@ -148,8 +153,18 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
         if (result.ok) opts.onActiveSporeChange?.(null);
         continue;
       }
+      if (sub === 'tools') {
+        // Phase 23: introspection — show currently visible tool list post-allowlist.
+        emitSlash(
+          await handleSporeTools({
+            tools: opts.tools,
+            activeSpore: opts.getActiveSpore?.() ?? null,
+          }),
+        );
+        continue;
+      }
       emitSlash(
-        `Unknown /spore subcommand: ${sub}. Try: /spore list | /spore pin <name> | /spore unpin`,
+        `Unknown /spore subcommand: ${sub}. Try: /spore list | /spore pin <name> | /spore unpin | /spore tools`,
       );
       continue;
     }

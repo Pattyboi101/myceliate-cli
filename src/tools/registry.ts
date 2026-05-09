@@ -19,18 +19,52 @@ export type ToolRunContext = {
    * here so HITL-gated tools (bash) can identify which call's approval slot
    * the user is responding to in src/index.ts's Map<requestId, fn>. */
   toolUseId: string;
+  /** Phase 23: when true, ToolRegistry.invoke skips the allowlist gate.
+   * Reserved for ConversationLog rehydration during --resume. NEVER set
+   * from a live runReactLoop turn — secure default is gated. */
+  isHistoricalReplay?: boolean;
 };
+
+/** Phase 23: thrown when invoke() is called for a tool not visible to the active
+ * spore's allowlist on a live (non-rehydration) turn. The ReAct loop catches
+ * this and surfaces a tool error result so the model can recover. */
+export class ToolDeniedByAllowlistError extends Error {
+  constructor(public readonly toolName: string) {
+    super(`Tool execution denied by active spore allowlist: ${toolName}`);
+    this.name = 'ToolDeniedByAllowlistError';
+  }
+}
 
 export class ToolRegistry {
   private readonly tools = new Map<string, Tool<unknown>>();
+  private activeAllowlist: string[] | null = null;
 
   register<I>(tool: Tool<I>): void {
     if (this.tools.has(tool.name)) throw new Error(`Tool already registered: ${tool.name}`);
     this.tools.set(tool.name, tool as Tool<unknown>);
   }
 
+  setActiveAllowlist(names: string[] | null): void {
+    this.activeAllowlist = names;
+  }
+
+  /** Single source of truth for the allowlist predicate — backs both the
+   * schema-layer filter (getActiveTools/definitions) AND the dispatch-layer
+   * gate (invoke). Coordination tools are always allowed; execution tools are
+   * gated on the active allowlist when one is set. The two layers MUST NOT
+   * drift. */
+  private isToolAllowed(tool: Tool<unknown>): boolean {
+    if (this.activeAllowlist === null) return true;
+    if (tool.capability === 'coordination') return true;
+    return this.activeAllowlist.includes(tool.name);
+  }
+
+  getActiveTools(): Tool<unknown>[] {
+    return [...this.tools.values()].filter((t) => this.isToolAllowed(t));
+  }
+
   definitions(): ToolDefinition[] {
-    return [...this.tools.values()].map((t) => ({
+    return this.getActiveTools().map((t) => ({
       name: t.name,
       description: t.description,
       parameters: zodToStrictJsonSchema(t.inputSchema as unknown as z.ZodTypeAny),
@@ -44,6 +78,14 @@ export class ToolRegistry {
   async invoke(name: string, rawInput: unknown, ctx?: Partial<ToolRunContext>): Promise<string> {
     const tool = this.tools.get(name);
     if (!tool) throw new Error(`Unknown tool: ${name}`);
+    // Phase 23 dispatch-layer gate. Defense-in-depth: even if the schema-layer
+    // filter is bypassed (model hallucination, future bypass code path), this
+    // gate prevents execution. The intentional bypass for --resume rehydration
+    // is the ctx.isHistoricalReplay flag, which ConversationLog passes through
+    // when reading historical tool_calls.
+    if (!ctx?.isHistoricalReplay && !this.isToolAllowed(tool)) {
+      throw new ToolDeniedByAllowlistError(name);
+    }
     const parsed = tool.inputSchema.parse(rawInput);
     const fullCtx: ToolRunContext = {
       cwd: ctx?.cwd ?? process.cwd(),

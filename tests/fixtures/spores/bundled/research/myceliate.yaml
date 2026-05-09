@@ -1,0 +1,5 @@
+name: research
+description: Academic research workflows and literature review.
+version: 1.0.0
+accent_color: "#4a90c4"
+agents: []

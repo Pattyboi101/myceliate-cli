@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Logger } from '../util/logger.js';
+import { noopLogger } from '../util/noopLogger.js';
 import { SporeRegistry } from './SporeRegistry.js';
 import { readPin } from './pinFile.js';
 import { parseSkillFrontmatter } from './skillFrontmatter.js';
@@ -19,26 +21,32 @@ export interface SporeBootResult {
   germinatedSection: string;
 }
 
-export async function bootSpores(cwd: string, noSpore: boolean): Promise<SporeBootResult> {
+export async function bootSpores(
+  cwd: string,
+  noSpore: boolean,
+  logger?: Logger,
+): Promise<SporeBootResult> {
   const projectSporesDir = resolve(cwd, '.myceliate', 'skills');
   if (noSpore) {
-    // TODO(v1.4): SporeRegistry.empty() factory instead of /nonexistent paths
     return {
       activeSpore: null,
-      registry: await SporeRegistry.discover({
-        bundledDir: '/nonexistent',
-        userDir: '/nonexistent',
-        projectDir: '/nonexistent',
-      }),
+      registry: SporeRegistry.empty(),
       germinatedSection: '',
     };
   }
-  const registry = await SporeRegistry.discover({
-    bundledDir: BUNDLED_SPORES_DIR,
-    userDir: USER_SPORES_DIR,
-    projectDir: projectSporesDir,
-  });
-  const pinned = await readPin(cwd);
+
+  // Provide a no-op logger when none is supplied (e.g. tests that don't pass one).
+  const log: Logger = logger ?? noopLogger;
+
+  const registry = await SporeRegistry.discover(
+    {
+      bundledDir: BUNDLED_SPORES_DIR,
+      userDir: USER_SPORES_DIR,
+      projectDir: projectSporesDir,
+    },
+    { logger: log },
+  );
+  const pinned = await readPin(cwd, log);
   let activeSpore: string | null = null;
   let germinatedSection = '';
   if (pinned) {

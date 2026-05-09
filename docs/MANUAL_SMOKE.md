@@ -138,3 +138,29 @@ These are walked against the live DeepSeek API. Allocate ~30 minutes.
 ### Pass criteria
 
 All 6 sections complete with no errors thrown. v1.3 tag candidate.
+
+---
+
+## v1.4 — Maximal Pack Features
+
+### Phase 22 walk-points
+
+1. **Pack command — happy path**
+   - Run `myceliate` in a fresh project.
+   - `/spore pin research`
+   - `/research:lit-review microplastics in freshwater`
+   - Expected: prompt expanded with the topic, model produces a 5-source lit review.
+
+2. **Pack command — pack-not-active refusal**
+   - With no spore pinned (or `solo-business` pinned):
+   - `/research:lit-review test`
+   - Expected: orchestrator output `"/research:lit-review requires the "research" spore to be active. Pin it first via /spore pin research."`. No model call made.
+
+3. **Pack command — command-not-found**
+   - `/spore pin research`
+   - `/research:fakecmd anything`
+   - Expected: orchestrator output `'spore "research" has no command "fakecmd"'`.
+
+4. **Pack command — pack-not-found**
+   - `/nonexistent:foo`
+   - Expected: orchestrator output `'no spore named "nonexistent"'`.

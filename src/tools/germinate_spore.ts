@@ -4,6 +4,8 @@ import type { GerminationEvent, StreamEvent } from '../adapters/streamEvent.js';
 import type { SporeRegistry } from '../spores/SporeRegistry.js';
 import { writePin } from '../spores/pinFile.js';
 import { parseSkillFrontmatter } from '../spores/skillFrontmatter.js';
+import type { Logger } from '../util/logger.js';
+import { noopLogger } from '../util/noopLogger.js';
 
 export const GerminateSporeInputSchema = z.object({ name: z.string().min(1) }).strict();
 export type GerminateSporeInput = z.infer<typeof GerminateSporeInputSchema>;
@@ -20,6 +22,8 @@ export interface GerminateSporeDeps {
    * two sector bodies when the model calls germinate_spore twice in one session.
    */
   appendSystemPrompt: (body: string) => void;
+  /** Optional logger — when absent, a silent no-op is used. */
+  logger?: Logger;
 }
 
 export interface GerminateSporeTool {
@@ -42,7 +46,7 @@ export function createGerminateSporeTool(deps: GerminateSporeDeps): GerminateSpo
       const { body } = parseSkillFrontmatter(sectorRaw);
       const delimited = `\n\n<!-- BEGIN GERMINATED SPORE: ${spore.name} -->\n${body.trim()}\n<!-- END GERMINATED SPORE: ${spore.name} -->\n`;
       deps.appendSystemPrompt(delimited);
-      await writePin(deps.cwd, spore.name);
+      await writePin(deps.cwd, spore.name, deps.logger ?? noopLogger);
       const event: GerminationEvent = {
         type: 'germination',
         spore: spore.name,

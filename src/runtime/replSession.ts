@@ -2,11 +2,13 @@
 import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { Message } from '../adapters/messages.js';
 import type { StreamEvent } from '../adapters/streamEvent.js';
+import { dispatch } from '../cli/slashDispatcher.js';
 import { handleSporeList, handleSporePin, handleSporeUnpin } from '../cli/sporeSlashCommands.js';
 import { QueryEngine } from '../orchestrator/QueryEngine.js';
 import { runReactLoop } from '../orchestrator/reactLoop.js';
 import type { SporeRegistry } from '../spores/SporeRegistry.js';
 import type { ToolRegistry } from '../tools/registry.js';
+import type { Logger } from '../util/logger.js';
 
 export type ReplSessionOptions = {
   client: DeepSeekClient;
@@ -42,6 +44,16 @@ export type ReplSessionOptions = {
    * Consumer re-renders the InputBox border colour.
    */
   onActiveSporeChange?: (name: string | null) => void;
+  /**
+   * Phase 22: structured logger for slash audit + future telemetry.
+   * Required when sporeRegistry is provided for pack-command dispatch.
+   */
+  logger?: Logger;
+  /**
+   * Phase 22: returns the currently active spore name (null if none). Read fresh per dispatch
+   * because /spore pin/unpin can change it between turns.
+   */
+  getActiveSpore?: () => string | null;
 };
 
 // Phase 12 review m2 fix: `''` removed from QUIT_TOKENS so an accidental empty
@@ -50,6 +62,17 @@ export type ReplSessionOptions = {
 const QUIT_TOKENS = new Set(['/quit', '/exit']);
 
 export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
+  // Phase 22 review fix: the JSDoc on `logger` says it is required when
+  // `sporeRegistry` is provided, but the type is `?:`. This runtime check
+  // makes the contract explicit so a future caller that omits `logger` while
+  // wiring a registry fails fast instead of silently dropping pack-command
+  // dispatch (which would let `/<pack>:<command>` input fall through to the
+  // model as raw text — a quiet correctness regression).
+  if (opts.sporeRegistry !== undefined && opts.logger === undefined) {
+    throw new Error(
+      'replSession: sporeRegistry requires logger (slash dispatcher cannot run without audit logging)',
+    );
+  }
   const engine = new QueryEngine({
     systemPrompt: opts.systemPrompt ?? 'You are myceliate, an autonomous CLI agent.',
     workingBudget: opts.workingBudget ?? 200_000,
@@ -66,6 +89,39 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
     const prompt = (await opts.readNextPrompt()).trim();
     if (QUIT_TOKENS.has(prompt)) return;
     if (prompt.length === 0) continue; // Empty submit just re-prompts.
+
+    // Phase 22: namespaced pack command dispatch. Runs BEFORE /spore built-ins.
+    if (opts.sporeRegistry && opts.logger) {
+      const result = await dispatch(prompt, {
+        registry: opts.sporeRegistry,
+        activeSpore: opts.getActiveSpore?.() ?? null,
+        cwd: opts.cwd,
+        logger: opts.logger,
+      });
+      if (result.kind === 'expanded-prompt') {
+        // Inject the expanded body as a user message. Engine snapshot records it;
+        // ConversationLog persists it on turn complete.
+        // The expanded body is NEVER re-dispatched even if it starts with '/' —
+        // dispatcher fires only on direct REPL input (per spec §2.1 §5).
+        engine.appendUser(result.body);
+        for await (const ev of runReactLoop({
+          client: opts.client,
+          engine,
+          tools: opts.tools,
+          model: opts.model,
+          cwd: opts.cwd,
+        })) {
+          opts.onState(ev);
+        }
+        await opts.onTurnComplete(engine.snapshot());
+        continue;
+      }
+      if (result.kind === 'orchestrator-output') {
+        emitSlash(result.text);
+        continue;
+      }
+      // result.kind === 'no-match' — fall through to the existing /spore block.
+    }
 
     // Phase 21: /spore command interception — handled locally, not sent to model.
     if (opts.sporeRegistry && prompt.startsWith('/spore')) {

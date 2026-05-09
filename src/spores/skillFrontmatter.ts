@@ -13,6 +13,7 @@ export const SkillFrontmatterSchema = z
         200,
         'description must be ≤ 200 chars (it gets injected into the orchestrator system prompt)',
       ),
+    'argument-hint': z.string().min(1).max(80).optional(),
   })
   .strict();
 

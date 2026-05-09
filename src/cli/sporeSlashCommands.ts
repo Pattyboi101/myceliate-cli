@@ -1,6 +1,8 @@
 // src/cli/sporeSlashCommands.ts
 import type { SporeRegistry } from '../spores/SporeRegistry.js';
 import { clearPin, writePin } from '../spores/pinFile.js';
+import type { Logger } from '../util/logger.js';
+import { noopLogger } from '../util/noopLogger.js';
 
 export interface SporeListArgs {
   registry: SporeRegistry;
@@ -24,21 +26,23 @@ export interface SporePinArgs {
   registry: SporeRegistry;
   cwd: string;
   name: string;
+  logger?: Logger;
 }
 
 export type SporeCommandResult = { ok: true; message: string } | { ok: false; message: string };
 
 export async function handleSporePin(args: SporePinArgs): Promise<SporeCommandResult> {
   if (!args.registry.get(args.name)) return { ok: false, message: `unknown spore "${args.name}"` };
-  await writePin(args.cwd, args.name);
+  await writePin(args.cwd, args.name, args.logger ?? noopLogger);
   return { ok: true, message: `Pinned ${args.name}` };
 }
 
 export interface SporeUnpinArgs {
   cwd: string;
+  logger?: Logger;
 }
 
 export async function handleSporeUnpin(args: SporeUnpinArgs): Promise<SporeCommandResult> {
-  await clearPin(args.cwd);
+  await clearPin(args.cwd, args.logger ?? noopLogger);
   return { ok: true, message: 'Unpinned' };
 }

@@ -1,3 +1,4 @@
+import type { CommandRecord } from './CommandRecord.js';
 import type { SporeManifest } from './SporeManifest.js';
 import type { SkillFrontmatter } from './skillFrontmatter.js';
 
@@ -26,4 +27,6 @@ export interface Spore {
   sectorSkillPath: string;
   /** Persona refs (lazy — bodies loaded only when spawned). */
   personas: PersonaRef[];
+  /** Per-pack slash command refs (lazy — bodies loaded on dispatch). */
+  commands: CommandRecord[];
 }

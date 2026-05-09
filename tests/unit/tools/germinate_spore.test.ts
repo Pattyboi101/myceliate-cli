@@ -6,6 +6,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import { readPin } from '../../../src/spores/pinFile.js';
 import { createGerminateSporeTool } from '../../../src/tools/germinate_spore.js';
+import type { Logger } from '../../../src/util/logger.js';
+
+const noopLogger: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  flush: async () => {},
+};
 
 async function buildFixtureSpore(root: string, name: string, accent: string): Promise<void> {
   const dir = join(root, name);
@@ -39,11 +48,10 @@ describe('germinate_spore tool', () => {
     await mkdir(cwd, { recursive: true });
     await buildFixtureSpore(bundledDir, 'demo', '#abcdef');
 
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
     const events: Array<unknown> = [];
     let appendedBody: string | null = null;
     const tool = createGerminateSporeTool({
@@ -58,18 +66,17 @@ describe('germinate_spore tool', () => {
     const result = await tool.handler({ name: 'demo' });
     expect(result.ok).toBe(true);
     expect(appendedBody).toMatch(/demo body/);
-    expect(await readPin(cwd)).toBe('demo');
+    expect(await readPin(cwd, noopLogger)).toBe('demo');
     expect(events).toContainEqual(
       expect.objectContaining({ type: 'germination', spore: 'demo', accent_color: '#abcdef' }),
     );
   });
 
   it('rejects unknown spore name', async () => {
-    const registry = await SporeRegistry.discover({
-      bundledDir: '/none',
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir: '/none', userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
     const tool = createGerminateSporeTool({
       registry,
       cwd: workspace,

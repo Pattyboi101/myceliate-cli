@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkerCrashedError, startWorker } from '../../src/runtime/workerLifecycle.js';
 import { createLogger } from '../../src/util/logger.js';
 
-const REDIS_URL = process.env.REDIS_URL;
+const REDIS_URL = process.env.REDIS_URL ?? '';
 
 describe.skipIf(!REDIS_URL)('workerLifecycle integration', () => {
   const logger = createLogger({ logsDir: '/tmp/myceliate-test-logs' });
@@ -25,7 +25,7 @@ describe.skipIf(!REDIS_URL)('workerLifecycle integration', () => {
   it('rejects pending bash promises within 200ms of real worker crash (SIGKILL)', async () => {
     // Use the real pnpm queue:worker — it starts up, then we SIGKILL it to simulate a crash.
     const handle = await startWorker({
-      redisUrl: REDIS_URL!,
+      redisUrl: REDIS_URL,
       logger,
       logsDir: '/tmp/myceliate-test-logs',
     });
@@ -60,7 +60,7 @@ describe.skipIf(!REDIS_URL)('workerLifecycle integration', () => {
     //
     // This test verifies: shutdown() with a real worker completes within 3s.
     const handle = await startWorker({
-      redisUrl: REDIS_URL!,
+      redisUrl: REDIS_URL,
       logger,
       logsDir: '/tmp/myceliate-test-logs',
     });

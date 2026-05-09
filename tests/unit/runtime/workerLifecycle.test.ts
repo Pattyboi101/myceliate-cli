@@ -163,7 +163,7 @@ describe('workerLifecycle — pending jobs Map', () => {
       exitCode: null,
     } as never);
     vi.spyOn(fs, 'mkdirSync').mockImplementation(() => undefined);
-    vi.spyOn(fs, 'createWriteStream').mockReturnValue({} as never);
+    vi.spyOn(fs, 'createWriteStream').mockReturnValue({ end: vi.fn() } as never);
   });
 
   it('trackJob + releaseJob cycle does not throw', async () => {
@@ -199,7 +199,7 @@ describe('workerLifecycle — crash detection', () => {
       ping: vi.fn().mockResolvedValue('PONG'),
     } as never);
     vi.spyOn(fs, 'mkdirSync').mockImplementation(() => undefined);
-    vi.spyOn(fs, 'createWriteStream').mockReturnValue({} as never);
+    vi.spyOn(fs, 'createWriteStream').mockReturnValue({ end: vi.fn() } as never);
   });
 
   it('rejects all tracked jobs on non-clean exit', async () => {

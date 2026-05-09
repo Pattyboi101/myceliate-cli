@@ -91,11 +91,15 @@ export async function startWorker(opts: {
   const releaseJob: WorkerHandle['releaseJob'] = (jobId) => {
     pendingJobs.delete(jobId);
   };
-  // Task 6: shutdownInitiated flag distinguishes clean shutdown from crash.
+  // Task 6 + post-review fix: single shutdownInitiated flag covers BOTH the crash-
+  // handler suppression (so a SIGTERM-triggered exit doesn't fan out as a crash) AND
+  // the shutdown() idempotency guard. The earlier two-flag scheme (shutdownInitiated +
+  // shuttingDown) was redundant — code-quality review flagged the ordering subtlety.
   let shutdownInitiated = false;
-  let shuttingDown = false;
-  // Task 6: crash handler — distinguishes clean shutdown from unexpected exit.
+  // Crash handler — distinguishes clean shutdown from unexpected exit. Also closes the
+  // worker.log WriteStream so the file descriptor doesn't leak across worker restarts.
   child.on('exit', (code, signal) => {
+    workerLog.end();
     if (shutdownInitiated) {
       opts.logger.info({ event: 'worker_shutdown_complete', code, signal });
       return;
@@ -116,10 +120,12 @@ export async function startWorker(opts: {
     }
   });
   const shutdown = async (): Promise<void> => {
+    if (shutdownInitiated) return;
     shutdownInitiated = true;
-    if (shuttingDown) return;
-    shuttingDown = true;
-    if (child.exitCode !== null) return; // already exited
+    if (child.exitCode !== null) {
+      workerLog.end(); // child already exited; exit handler may not have fired
+      return;
+    }
     child.kill('SIGTERM');
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {

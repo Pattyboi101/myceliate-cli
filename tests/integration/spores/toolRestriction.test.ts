@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { bootTools } from '../../../src/runtime/bootTools.js';
-import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import type { HitlGate } from '../../../src/security/hitlGate.js';
-import type { Logger } from '../../../src/util/logger.js';
 import type { Spore } from '../../../src/spores/Spore.js';
+import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
+import type { Logger } from '../../../src/util/logger.js';
 
 const noopLogger: Logger = {
   debug: () => {},
@@ -54,7 +54,10 @@ describe('Phase 23 integration — active spore drives allowlist', () => {
 
     // Expected: registry.definitions() includes read_file, grep, germinate_spore,
     // spawn_subagent (only). write_file, list_dir, bash absent.
-    const activeNames = tools.definitions().map((d) => d.name).sort();
+    const activeNames = tools
+      .definitions()
+      .map((d) => d.name)
+      .sort();
     expect(activeNames).toContain('read_file');
     expect(activeNames).toContain('grep');
     expect(activeNames).toContain('germinate_spore');
@@ -108,7 +111,10 @@ describe('Phase 23 integration — active spore drives allowlist', () => {
     setActiveSpore('research');
 
     // After germination: only read_file + coordination tools visible.
-    const names = tools.getActiveTools().map((t) => t.name).sort();
+    const names = tools
+      .getActiveTools()
+      .map((t) => t.name)
+      .sort();
     expect(names).toContain('read_file');
     expect(names).not.toContain('write_file');
     expect(names).not.toContain('bash');

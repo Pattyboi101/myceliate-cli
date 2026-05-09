@@ -28,6 +28,7 @@ import { composeSystemSections } from './orchestrator/composeSystemSections.js';
 import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
+import { bootTools } from './runtime/bootTools.js';
 import { runReplSession } from './runtime/replSession.js';
 import {
   buildTurnsFromHistory,
@@ -38,7 +39,6 @@ import {
 import { startWorker } from './runtime/workerLifecycle.js';
 import { type ApprovalRequest, type ApprovalResponse, HitlGate } from './security/hitlGate.js';
 import { bootSpores } from './spores/bootSpores.js';
-import { bootTools } from './runtime/bootTools.js';
 import { App, type AppState, type CompletedTurn } from './ui/App.js';
 import { runOnboarding } from './ui/onboarding.js';
 import { createLogger } from './util/logger.js';

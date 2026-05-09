@@ -31,8 +31,6 @@ describe('SporeManifest.allowed_tools', () => {
   });
 
   it('rejects allowed_tools that is not an array', () => {
-    expect(() =>
-      parseSporeManifest(`${baseFields}\nallowed_tools: read_file`),
-    ).toThrow();
+    expect(() => parseSporeManifest(`${baseFields}\nallowed_tools: read_file`)).toThrow();
   });
 });

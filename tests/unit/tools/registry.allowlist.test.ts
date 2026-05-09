@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { ToolDeniedByAllowlistError, ToolRegistry, type Tool } from '../../../src/tools/registry.js';
+import {
+  type Tool,
+  ToolDeniedByAllowlistError,
+  ToolRegistry,
+} from '../../../src/tools/registry.js';
 
 function mkTool(name: string, capability: 'coordination' | 'execution'): Tool<{ x: number }> {
   return {
@@ -18,7 +22,10 @@ describe('ToolRegistry allowlist', () => {
     r.register(mkTool('read_file', 'execution'));
     r.register(mkTool('write_file', 'execution'));
     r.register(mkTool('germinate_spore', 'coordination'));
-    const names = r.getActiveTools().map((t) => t.name).sort();
+    const names = r
+      .getActiveTools()
+      .map((t) => t.name)
+      .sort();
     expect(names).toEqual(['germinate_spore', 'read_file', 'write_file']);
   });
 
@@ -29,7 +36,10 @@ describe('ToolRegistry allowlist', () => {
     r.register(mkTool('germinate_spore', 'coordination'));
     r.register(mkTool('spawn_subagent', 'coordination'));
     r.setActiveAllowlist([]);
-    const names = r.getActiveTools().map((t) => t.name).sort();
+    const names = r
+      .getActiveTools()
+      .map((t) => t.name)
+      .sort();
     expect(names).toEqual(['germinate_spore', 'spawn_subagent']);
   });
 
@@ -40,7 +50,10 @@ describe('ToolRegistry allowlist', () => {
     r.register(mkTool('grep', 'execution'));
     r.register(mkTool('germinate_spore', 'coordination'));
     r.setActiveAllowlist(['read_file', 'grep']);
-    const names = r.getActiveTools().map((t) => t.name).sort();
+    const names = r
+      .getActiveTools()
+      .map((t) => t.name)
+      .sort();
     expect(names).toEqual(['germinate_spore', 'grep', 'read_file']);
   });
 
@@ -60,7 +73,10 @@ describe('ToolRegistry allowlist', () => {
     r.register(mkTool('write_file', 'execution'));
     r.register(mkTool('germinate_spore', 'coordination'));
     r.setActiveAllowlist(['read_file']);
-    const names = r.definitions().map((d) => d.name).sort();
+    const names = r
+      .definitions()
+      .map((d) => d.name)
+      .sort();
     expect(names).toEqual(['germinate_spore', 'read_file']);
   });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { handleSporeTools } from '../../../src/cli/sporeSlashCommands.js';
-import { ToolRegistry, type Tool } from '../../../src/tools/registry.js';
+import { type Tool, ToolRegistry } from '../../../src/tools/registry.js';
 
 function mkTool(name: string, capability: 'coordination' | 'execution'): Tool<{ x: number }> {
   return {

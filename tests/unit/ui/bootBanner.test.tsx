@@ -18,14 +18,16 @@ const baseState: AppState = {
 
 describe('App boot warnings banner', () => {
   it('banner is hidden when bootWarnings is empty', () => {
-    const { lastFrame } = render(React.createElement(App, { state: { ...baseState, bootWarnings: [] } }));
+    const { lastFrame } = render(
+      React.createElement(App, { state: { ...baseState, bootWarnings: [] } }),
+    );
     const out = lastFrame() ?? '';
     expect(out).not.toContain('[!]');
   });
 
   it('banner is hidden when bootWarnings is undefined (legacy fixtures)', () => {
     const stateWithoutWarnings: AppState = { ...baseState };
-    delete stateWithoutWarnings.bootWarnings;
+    stateWithoutWarnings.bootWarnings = undefined;
     const { lastFrame } = render(React.createElement(App, { state: stateWithoutWarnings }));
     const out = lastFrame() ?? '';
     expect(out).not.toContain('[!]');

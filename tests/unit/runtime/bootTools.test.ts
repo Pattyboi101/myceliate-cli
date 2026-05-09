@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { bootTools } from '../../../src/runtime/bootTools.js';
-import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import type { HitlGate } from '../../../src/security/hitlGate.js';
-import type { Logger } from '../../../src/util/logger.js';
 import type { Spore } from '../../../src/spores/Spore.js';
+import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
+import type { Logger } from '../../../src/util/logger.js';
 
 const noopLogger: Logger = {
   debug: () => {},
@@ -47,13 +47,19 @@ describe('bootTools', () => {
       registry,
       logger: noopLogger,
     });
-    const names = result.tools.byCapability('execution').map((t) => t.name).sort();
+    const names = result.tools
+      .byCapability('execution')
+      .map((t) => t.name)
+      .sort();
     expect(names).toContain('read_file');
     expect(names).toContain('write_file');
     expect(names).toContain('grep');
     expect(names).toContain('list_dir');
     expect(names).toContain('bash');
-    const coord = result.tools.byCapability('coordination').map((t) => t.name).sort();
+    const coord = result.tools
+      .byCapability('coordination')
+      .map((t) => t.name)
+      .sort();
     expect(coord).toEqual(['germinate_spore', 'spawn_subagent']);
   });
 
@@ -61,7 +67,10 @@ describe('bootTools', () => {
     const registry = SporeRegistry.fromList([mkSpore('locked', ['read_file', 'grep'])]);
     const result = bootTools({ hitl: fakeHitl, registry, logger: noopLogger });
     result.setActiveSpore('locked');
-    const visible = result.tools.getActiveTools().map((t) => t.name).sort();
+    const visible = result.tools
+      .getActiveTools()
+      .map((t) => t.name)
+      .sort();
     expect(visible).toEqual(['germinate_spore', 'grep', 'read_file', 'spawn_subagent']);
   });
 
@@ -69,7 +78,10 @@ describe('bootTools', () => {
     const registry = SporeRegistry.fromList([mkSpore('open', undefined)]);
     const result = bootTools({ hitl: fakeHitl, registry, logger: noopLogger });
     result.setActiveSpore('open');
-    const names = result.tools.getActiveTools().map((t) => t.name).sort();
+    const names = result.tools
+      .getActiveTools()
+      .map((t) => t.name)
+      .sort();
     expect(names.length).toBeGreaterThanOrEqual(7); // all 5 execution + 2 coordination
   });
 
@@ -119,7 +131,10 @@ describe('bootTools', () => {
     expect(
       events.some((e) => e.event === 'allowlist_unknown_tool' && e.tool === 'totally_fake_tool'),
     ).toBe(true);
-    const names = result.tools.getActiveTools().map((t) => t.name).sort();
+    const names = result.tools
+      .getActiveTools()
+      .map((t) => t.name)
+      .sort();
     expect(names).toContain('read_file');
     expect(names).not.toContain('totally_fake_tool');
   });
@@ -137,7 +152,10 @@ describe('bootTools', () => {
     ).toBe(true);
     // germinate_spore is still visible (coordination always visible) — but the warning
     // signals to the author that listing it had no effect.
-    const names = result.tools.getActiveTools().map((t) => t.name).sort();
+    const names = result.tools
+      .getActiveTools()
+      .map((t) => t.name)
+      .sort();
     expect(names).toContain('germinate_spore');
   });
 });

@@ -2,14 +2,14 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { ConversationLog } from '../../../src/memory/conversationLog.js';
 import { MarkdownStore } from '../../../src/memory/markdownStore.js';
 import { bootTools } from '../../../src/runtime/bootTools.js';
-import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import type { HitlGate } from '../../../src/security/hitlGate.js';
-import type { Logger } from '../../../src/util/logger.js';
 import type { Spore } from '../../../src/spores/Spore.js';
-import { ConversationLog } from '../../../src/memory/conversationLog.js';
+import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import { ToolDeniedByAllowlistError } from '../../../src/tools/registry.js';
+import type { Logger } from '../../../src/util/logger.js';
 
 const noopLogger: Logger = {
   debug: () => {},
@@ -54,7 +54,7 @@ describe('Phase 23 integration — --resume across allowlist change', () => {
       //    to write_file, plus the corresponding tool result.
       const histDir = join(cwd, '.myceliate', 'history');
       await mkdir(histDir, { recursive: true });
-      const lines = [
+      const lines = `${[
         JSON.stringify({ role: 'user', content: 'do something' }),
         JSON.stringify({
           role: 'assistant',
@@ -63,9 +63,14 @@ describe('Phase 23 integration — --resume across allowlist change', () => {
         }),
         JSON.stringify({
           role: 'tool',
-          result: { tool_use_id: 'c1', command: 'write_file ...', is_error: false, content: 'ok' },
+          result: {
+            tool_use_id: 'c1',
+            command: 'write_file ...',
+            is_error: false,
+            content: 'ok',
+          },
         }),
-      ].join('\n') + '\n';
+      ].join('\n')}\n`;
       await writeFile(join(histDir, `${sessionId}.jsonl`), lines, 'utf8');
 
       // 2. Create a registry where the active spore allows ONLY read_file.
@@ -95,9 +100,9 @@ describe('Phase 23 integration — --resume across allowlist change', () => {
       //     for a denied tool THROWS ToolDeniedByAllowlistError.
       //     This is the LOAD-BEARING defense-in-depth assertion against Case 4
       //     (model hallucinates a tool_call for a tool not in the schema).
-      await expect(
-        tools.invoke('write_file', { path: 'x', content: 'y' }),
-      ).rejects.toThrow(ToolDeniedByAllowlistError);
+      await expect(tools.invoke('write_file', { path: 'x', content: 'y' })).rejects.toThrow(
+        ToolDeniedByAllowlistError,
+      );
 
       // 5d. invoke() with isHistoricalReplay bypasses the allowlist gate for
       //     write_file (historical turn used write_file before the allowlist was
@@ -105,7 +110,11 @@ describe('Phase 23 integration — --resume across allowlist change', () => {
       //     Note: write_file will throw a real error (no parent dir in this test),
       //     but the error must NOT be ToolDeniedByAllowlistError.
       try {
-        await tools.invoke('write_file', { path: '/nonexistent/path/x', content: 'y' }, { isHistoricalReplay: true });
+        await tools.invoke(
+          'write_file',
+          { path: '/nonexistent/path/x', content: 'y' },
+          { isHistoricalReplay: true },
+        );
       } catch (err) {
         // Any error is fine EXCEPT ToolDeniedByAllowlistError — the bypass worked.
         expect(err).not.toBeInstanceOf(ToolDeniedByAllowlistError);

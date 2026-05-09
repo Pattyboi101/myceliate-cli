@@ -15,7 +15,7 @@ export function createWriteFileTool(
     description:
       'Write content to a UTF-8 text file at the given absolute path. Creates parent directories. Writes outside the orchestrator cwd require HITL approval.',
     capability: 'execution',
-    inputSchema: z.object({ path: z.string(), content: z.string() }),
+    inputSchema: { kind: 'zod', zod: z.object({ path: z.string(), content: z.string() }) },
     run: async ({ path, content }, ctx) => {
       const verdict = await deps.hitl.checkWrite({
         path,

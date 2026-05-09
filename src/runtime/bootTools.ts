@@ -73,7 +73,7 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
       name: 'bash',
       description: 'Execute shell commands (stub — no queue in this context)',
       capability: 'execution',
-      inputSchema: BashStubSchema,
+      inputSchema: { kind: 'zod', zod: BashStubSchema },
       run: async () => 'bash stub: not available in test context',
     });
   }
@@ -89,7 +89,7 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
     name: 'germinate_spore',
     description: germinateTool.description,
     capability: 'coordination' as const,
-    inputSchema: germinateTool.inputSchema,
+    inputSchema: { kind: 'zod', zod: germinateTool.inputSchema },
     run: async (input, _ctx) => {
       const result = await germinateTool.handler(input);
       if (result.ok && opts.setActiveSporeFromGerminate) {
@@ -109,7 +109,7 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
     name: 'spawn_subagent',
     description: spawnTool.description,
     capability: 'coordination' as const,
-    inputSchema: spawnTool.inputSchema,
+    inputSchema: { kind: 'zod', zod: spawnTool.inputSchema },
     run: async (input, _ctx) => {
       const result = await spawnTool.handler(input);
       return JSON.stringify(result);

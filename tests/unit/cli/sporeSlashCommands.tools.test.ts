@@ -8,7 +8,7 @@ function mkTool(name: string, capability: 'coordination' | 'execution'): Tool<{ 
     name,
     description: `${name} description`,
     capability,
-    inputSchema: z.object({ x: z.number() }),
+    inputSchema: { kind: 'zod', zod: z.object({ x: z.number() }) },
     run: async () => 'ok',
   };
 }

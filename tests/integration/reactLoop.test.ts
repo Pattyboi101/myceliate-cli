@@ -49,7 +49,7 @@ describe('runReactLoop (mock client)', () => {
       name: 'echo',
       description: 'd',
       capability: 'execution',
-      inputSchema: z.object({ msg: z.string() }),
+      inputSchema: { kind: 'zod', zod: z.object({ msg: z.string() }) },
       run: async ({ msg }) => msg,
     });
     engine.appendUser('say hi');
@@ -80,7 +80,7 @@ describe('runReactLoop (mock client)', () => {
       name: 'echo',
       description: 'd',
       capability: 'execution',
-      inputSchema: z.object({ msg: z.string() }),
+      inputSchema: { kind: 'zod', zod: z.object({ msg: z.string() }) },
       run: async ({ msg }) => msg,
     });
     engine.appendUser('loop forever');
@@ -114,7 +114,7 @@ describe('runReactLoop (mock client)', () => {
       name: 'boom',
       description: 'd',
       capability: 'execution',
-      inputSchema: z.object({}),
+      inputSchema: { kind: 'zod', zod: z.object({}) },
       run: async () => {
         throw new Error('kaboom');
       },
@@ -156,7 +156,7 @@ describe('runReactLoop (mock client)', () => {
       name: 'bigout',
       description: 'd',
       capability: 'execution',
-      inputSchema: z.object({}),
+      inputSchema: { kind: 'zod', zod: z.object({}) },
       run: async () => bigContent,
     });
     engine.appendUser('get big output');
@@ -231,7 +231,7 @@ describe('runReactLoop (mock client)', () => {
       name: 'cwd_spy',
       description: 'd',
       capability: 'execution',
-      inputSchema: z.object({}),
+      inputSchema: { kind: 'zod', zod: z.object({}) },
       run: async (_input, ctx) => {
         observedCwd = ctx.cwd;
         return 'ok';
@@ -264,7 +264,7 @@ describe('runReactLoop (mock client)', () => {
       name: 'echo',
       description: 'd',
       capability: 'execution',
-      inputSchema: z.object({ msg: z.string() }),
+      inputSchema: { kind: 'zod', zod: z.object({ msg: z.string() }) },
       run: async ({ msg }) => msg,
     });
     engine.appendUser('say hi');
@@ -301,7 +301,7 @@ describe('runReactLoop (mock client)', () => {
       name: 'boom',
       description: 'd',
       capability: 'execution',
-      inputSchema: z.object({}),
+      inputSchema: { kind: 'zod', zod: z.object({}) },
       // Non-async run that throws synchronously. Return type is `never`,
       // assignable to `Promise<string>` because `never` is the bottom type.
       run: () => {

@@ -8,7 +8,19 @@ export type Tool<Input> = {
   name: string;
   description: string;
   capability: Capability;
-  inputSchema: z.ZodType<Input>;
+  /**
+   * T21 §5.7.1(b): discriminated union so MCP tool wrappers (T28) can
+   * register raw JSON Schemas from the server's tools/list response without
+   * round-tripping through a Zod converter.
+   *
+   * - `kind: 'zod'` — native tools. `definitions()` calls zodToStrictJsonSchema;
+   *   `invoke()` validates via zod.parse.
+   * - `kind: 'json-schema'` — MCP tool wrappers. `definitions()` returns
+   *   jsonSchema verbatim; `invoke()` passes rawInput as-is (server validates).
+   */
+  inputSchema:
+    | { kind: 'zod'; zod: z.ZodType<Input> }
+    | { kind: 'json-schema'; jsonSchema: Record<string, unknown> };
   run: (input: Input, ctx: ToolRunContext) => Promise<string>;
 };
 
@@ -44,6 +56,33 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool as Tool<unknown>);
   }
 
+  /**
+   * T21 §5.7.1(a): remove a tool from the registry. No-op if name is unknown.
+   * The active allowlist is NOT mutated — if a deregistered name was in the
+   * allowlist, getActiveTools() will silently exclude it next call (the filter
+   * intersection naturally handles this). Re-registering the tool later
+   * (re-germinating the spore) restores it without any allowlist update.
+   */
+  deregister(name: string): void {
+    this.tools.delete(name);
+  }
+
+  /**
+   * T21 §5.7.1(a): bulk variant for spore teardown. Removes all tools whose
+   * name starts with `prefix` (e.g. 'playwright_'). Returns the count removed
+   * for the caller to use in user-facing messages.
+   */
+  deregisterByPrefix(prefix: string): number {
+    let count = 0;
+    for (const name of this.tools.keys()) {
+      if (name.startsWith(prefix)) {
+        this.tools.delete(name);
+        count++;
+      }
+    }
+    return count;
+  }
+
   setActiveAllowlist(names: string[] | null): void {
     this.activeAllowlist = names;
   }
@@ -60,7 +99,10 @@ export class ToolRegistry {
     return this.getActiveTools().map((t) => ({
       name: t.name,
       description: t.description,
-      parameters: zodToStrictJsonSchema(t.inputSchema as unknown as z.ZodTypeAny),
+      parameters:
+        t.inputSchema.kind === 'zod'
+          ? zodToStrictJsonSchema(t.inputSchema.zod as z.ZodTypeAny)
+          : t.inputSchema.jsonSchema,
     }));
   }
 
@@ -81,7 +123,9 @@ export class ToolRegistry {
     if (!this.getActiveTools().some((t) => t.name === name)) {
       throw new ToolDeniedByAllowlistError(name);
     }
-    const parsed = tool.inputSchema.parse(rawInput);
+    // T21 §5.7.1(b): zod → parse+validate; json-schema → pass through (server validates).
+    const parsed =
+      tool.inputSchema.kind === 'zod' ? tool.inputSchema.zod.parse(rawInput) : rawInput;
     const fullCtx: ToolRunContext = {
       cwd: ctx?.cwd ?? process.cwd(),
       abort: ctx?.abort ?? new AbortController().signal,

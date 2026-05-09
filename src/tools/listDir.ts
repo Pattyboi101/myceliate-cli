@@ -8,7 +8,7 @@ export const listDirTool: Tool<{ path: string }> = {
   name: 'list_dir',
   description: 'List entries in a directory, one per line.',
   capability: 'execution',
-  inputSchema: z.object({ path: z.string() }),
+  inputSchema: { kind: 'zod', zod: z.object({ path: z.string() }) },
   // Phase 16 review (MAJOR-1): filter secret-adjacent filenames from the result.
   // The same filter applies to `senseContext.dirEntries` (system-prompt injection);
   // this closes the parallel R11 leak surface where an execution sub-agent could

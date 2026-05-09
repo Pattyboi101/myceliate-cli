@@ -32,7 +32,7 @@ function makeTools(): ToolRegistry {
     name: 'echo',
     description: 'd',
     capability: 'execution',
-    inputSchema: z.object({ msg: z.string() }),
+    inputSchema: { kind: 'zod', zod: z.object({ msg: z.string() }) },
     run: async ({ msg }) => msg,
   });
   return tools;
@@ -155,7 +155,7 @@ function makeMockTools(handlers: Record<string, () => Promise<string>>): ToolReg
       name,
       description: 'd',
       capability: 'execution',
-      inputSchema: z.object({ command: z.string() }),
+      inputSchema: { kind: 'zod', zod: z.object({ command: z.string() }) },
       run: async () => run(),
     });
   }

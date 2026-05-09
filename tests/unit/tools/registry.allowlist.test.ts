@@ -11,7 +11,7 @@ function mkTool(name: string, capability: 'coordination' | 'execution'): Tool<{ 
     name,
     description: `${name} tool`,
     capability,
-    inputSchema: z.object({ x: z.number() }),
+    inputSchema: { kind: 'zod', zod: z.object({ x: z.number() }) },
     run: async (_input, _ctx) => `ran ${name}`,
   };
 }

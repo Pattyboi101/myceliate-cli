@@ -109,15 +109,4 @@ describe('ToolRegistry allowlist', () => {
     const result = await r.invoke('germinate_spore', { x: 1 });
     expect(result).toBe('ran germinate_spore');
   });
-
-  it('invoke() with ctx.isHistoricalReplay=true bypasses the allowlist gate (rehydration mode)', async () => {
-    // ConversationLog.readSession's rehydration path passes isHistoricalReplay:true
-    // so historical tool_calls remain executable across allowlist changes.
-    // Spec §2.3 resume-safety. NEVER pass this flag from a live runReactLoop turn.
-    const r = new ToolRegistry();
-    r.register(mkTool('write_file', 'execution'));
-    r.setActiveAllowlist([]);
-    const result = await r.invoke('write_file', { x: 42 }, { isHistoricalReplay: true });
-    expect(result).toBe('ran write_file');
-  });
 });

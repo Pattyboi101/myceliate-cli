@@ -19,19 +19,12 @@ export type ToolRunContext = {
    * here so HITL-gated tools (bash) can identify which call's approval slot
    * the user is responding to in src/index.ts's Map<requestId, fn>. */
   toolUseId: string;
-  /** Phase 23: when true, ToolRegistry.invoke skips the allowlist gate.
-   * Reserved for ConversationLog rehydration during --resume. NEVER set
-   * from a live runReactLoop turn — secure default is gated. */
-  isHistoricalReplay?: boolean;
 };
 
-/** Phase 23: thrown when invoke() is called for a tool not visible to the active
- * spore's allowlist on a live (non-rehydration) turn. The ReAct loop catches
- * this and surfaces a tool error result so the model can recover. Carries
- * `cause` per CLAUDE.md "errors are typed and carry cause" convention,
- * mirroring SkillFrontmatterError — currently unused (denial is a pure
- * predicate result, not a wrapped exception) but preserved for future
- * call sites that want to chain context. */
+/** Phase 23: thrown when invoke() is called for a tool not visible in the active
+ * spore's allowlist. The ReAct loop catches this and surfaces a tool error
+ * result so the model can recover. Carries `cause` per CLAUDE.md "errors are
+ * typed and carry cause" convention, mirroring SkillFrontmatterError. */
 export class ToolDeniedByAllowlistError extends Error {
   constructor(
     public readonly toolName: string,
@@ -55,19 +48,12 @@ export class ToolRegistry {
     this.activeAllowlist = names;
   }
 
-  /** Single source of truth for the allowlist predicate — backs both the
-   * schema-layer filter (getActiveTools/definitions) AND the dispatch-layer
-   * gate (invoke). Coordination tools are always allowed; execution tools are
-   * gated on the active allowlist when one is set. The two layers MUST NOT
-   * drift. */
-  private isToolAllowed(tool: Tool<unknown>): boolean {
-    if (this.activeAllowlist === null) return true;
-    if (tool.capability === 'coordination') return true;
-    return this.activeAllowlist.includes(tool.name);
-  }
-
   getActiveTools(): Tool<unknown>[] {
-    return [...this.tools.values()].filter((t) => this.isToolAllowed(t));
+    if (this.activeAllowlist === null) return [...this.tools.values()];
+    const allowed = new Set(this.activeAllowlist);
+    return [...this.tools.values()].filter(
+      (t) => t.capability === 'coordination' || allowed.has(t.name),
+    );
   }
 
   definitions(): ToolDefinition[] {
@@ -85,14 +71,14 @@ export class ToolRegistry {
   async invoke(name: string, rawInput: unknown, ctx?: Partial<ToolRunContext>): Promise<string> {
     const tool = this.tools.get(name);
     if (!tool) throw new Error(`Unknown tool: ${name}`);
-    // Phase 23 dispatch-layer gate. Defense-in-depth: even if the schema-layer
-    // filter is bypassed (model hallucination, future bypass code path), this
-    // gate prevents execution. The ctx.isHistoricalReplay bypass is reserved
-    // for future rehydration paths that re-execute historical tool_calls;
-    // v1.4 --resume only reconstructs message history (no invoke), so no
-    // production caller currently sets the flag. The integration test in
-    // toolRestrictionResume validates the bypass works at the registry level.
-    if (!ctx?.isHistoricalReplay && !this.isToolAllowed(tool)) {
+    // Phase 23 dispatch-layer gate. Topology: dispatch authorization is DERIVED
+    // from the schema layer — invoke() can only execute a tool the orchestrator
+    // just offered to the model via getActiveTools()/definitions(). The two
+    // layers cannot drift because there is no separate predicate to maintain.
+    // No bypass path exists: v1.4 --resume only reconstructs message history
+    // and never re-invokes historical tool_calls, so the gate is unconditional.
+    // Cost: O(n) over ~20 tools, sub-millisecond in an I/O-bound CLI.
+    if (!this.getActiveTools().some((t) => t.name === name)) {
       throw new ToolDeniedByAllowlistError(name);
     }
     const parsed = tool.inputSchema.parse(rawInput);

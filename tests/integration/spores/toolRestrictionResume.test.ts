@@ -44,14 +44,15 @@ function mkSpore(name: string, allowedTools: string[] | undefined): Spore {
   };
 }
 
-describe('Phase 23 integration — allowlist + --resume rehydration gate', () => {
-  // Note: this test exercises the ToolRegistry-level gate (live invoke denies
-  // + ctx.isHistoricalReplay bypasses). v1.4 --resume only reconstructs
-  // message history without re-invoking tools, so the bypass flag is reserved
-  // for future rehydration paths. The session-history rehydration via
-  // ConversationLog.readSession is exercised here as scaffolding to prove
-  // it doesn't crash when historical tool_calls reference now-denied tools.
-  it('live invoke denies allowlist-excluded tools + ctx.isHistoricalReplay bypasses (rehydration path reserved)', async () => {
+describe('Phase 23 integration — allowlist + --resume rehydration', () => {
+  // v1.4 --resume only reconstructs message history without re-invoking
+  // historical tool_calls. This test verifies (a) rehydration via
+  // ConversationLog.readSession does not crash when history references
+  // tools no longer in the active allowlist, and (b) the dispatch gate
+  // unconditionally denies any live invoke (model-issued or hallucinated).
+  // There is no bypass flag — the gate is unconditional, derived from the
+  // schema layer (getActiveTools).
+  it('rehydrates message history with denied tool_calls + dispatch gate denies live invokes', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'myc-resume-'));
     try {
       const sessionId = 'test-session';
@@ -102,29 +103,14 @@ describe('Phase 23 integration — allowlist + --resume rehydration gate', () =>
       expect(defNames).not.toContain('write_file');
       expect(defNames).toContain('read_file');
 
-      // 5c. invoke() with no flag (simulating a live turn or hallucinated call)
-      //     for a denied tool THROWS ToolDeniedByAllowlistError.
-      //     This is the LOAD-BEARING defense-in-depth assertion against Case 4
-      //     (model hallucinates a tool_call for a tool not in the schema).
+      // 5c. invoke() of a denied tool THROWS ToolDeniedByAllowlistError. The
+      //     orchestrator's dispatch gate is unconditional — there is no
+      //     historical-replay bypass in v1.4 because --resume only reconstructs
+      //     message history (no invoke). Hallucinated tool_calls (Gemini Case 4)
+      //     and any future bypass route still hit this gate.
       await expect(tools.invoke('write_file', { path: 'x', content: 'y' })).rejects.toThrow(
         ToolDeniedByAllowlistError,
       );
-
-      // 5d. invoke() with isHistoricalReplay bypasses the allowlist gate for
-      //     write_file (historical turn used write_file before the allowlist was
-      //     changed). The rehydration path must not be blocked — spec §2.3.
-      //     Note: write_file will throw a real error (no parent dir in this test),
-      //     but the error must NOT be ToolDeniedByAllowlistError.
-      try {
-        await tools.invoke(
-          'write_file',
-          { path: '/nonexistent/path/x', content: 'y' },
-          { isHistoricalReplay: true },
-        );
-      } catch (err) {
-        // Any error is fine EXCEPT ToolDeniedByAllowlistError — the bypass worked.
-        expect(err).not.toBeInstanceOf(ToolDeniedByAllowlistError);
-      }
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

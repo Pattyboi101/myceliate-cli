@@ -38,15 +38,7 @@ import {
 import { startWorker } from './runtime/workerLifecycle.js';
 import { type ApprovalRequest, type ApprovalResponse, HitlGate } from './security/hitlGate.js';
 import { bootSpores } from './spores/bootSpores.js';
-import { childProcessSpawn } from './spores/childProcessSpawn.js';
-import { createBashTool } from './tools/bash.js';
-import { createGerminateSporeTool } from './tools/germinate_spore.js';
-import { grepTool } from './tools/grep.js';
-import { listDirTool } from './tools/listDir.js';
-import { readFileTool } from './tools/readFile.js';
-import { ToolRegistry } from './tools/registry.js';
-import { createSpawnSubagentTool } from './tools/spawn_subagent.js';
-import { writeFileTool } from './tools/writeFile.js';
+import { bootTools } from './runtime/bootTools.js';
 import { App, type AppState, type CompletedTurn } from './ui/App.js';
 import { runOnboarding } from './ui/onboarding.js';
 import { createLogger } from './util/logger.js';
@@ -114,8 +106,6 @@ async function main(): Promise<void> {
     onboarding.adapter === 'v3'
       ? new V3Adapter({ apiKey: onboarding.apiKey, baseUrl })
       : new V4Adapter({ apiKey: onboarding.apiKey, baseUrl });
-
-  const tools = new ToolRegistry();
 
   // Phase 12.5: mount Ink straight into `awaiting_input` so the banner +
   // PromptInput render before the user submits anything. Removes the Clack
@@ -199,18 +189,16 @@ async function main(): Promise<void> {
   const queueEvents = new QueueEvents('bash', { connection: getRedis() });
   const worker = startWorker();
 
-  tools.register(readFileTool);
-  tools.register(writeFileTool);
-  tools.register(listDirTool);
-  tools.register(grepTool);
-  tools.register(createBashTool({ hitl, queue, queueEvents, defaultTimeoutMs: 30_000 }));
-
-  // Phase 19: register spore coordination tools (R9 — coordination capability).
-  // appendSystemPrompt calls appendSystemSection on the live QueryEngine so
-  // runtime germination is visible to the model from the very next API call.
-  const germinateTool = createGerminateSporeTool({
+  // Phase 23: bootTools extracts the tool registration block from index.ts and
+  // adds setActiveSpore for allowlist management (Phase 23 Task 3).
+  let bootWarnings: string[] = [];
+  const { tools, setActiveSpore } = bootTools({
+    hitl,
+    queue,
+    queueEvents,
     registry: spores.registry,
     cwd,
+    logger,
     emit: (ev) => {
       if (isGermination(ev)) {
         uiActiveSpore = { name: ev.spore, accent_color: ev.accent_color };
@@ -224,36 +212,25 @@ async function main(): Promise<void> {
       // before pushing the new one, preventing double-sector-context stacking.
       engineRef?.replaceGerminatedSection(section);
     },
-  });
-  // Wrap germinate_spore to fit ToolRegistry's Tool<Input> interface.
-  tools.register({
-    name: 'germinate_spore',
-    description: germinateTool.description,
-    capability: 'coordination' as const,
-    inputSchema: germinateTool.inputSchema,
-    run: async (input, _ctx) => {
-      const result = await germinateTool.handler(input);
-      if (result.ok) activeSpore = result.spore;
-      return JSON.stringify(result);
+    activeSporeRef: () => activeSpore,
+    setActiveSporeFromGerminate: (name) => {
+      activeSpore = name;
+      setActiveSpore(name);
+    },
+    // Phase 23 Case 8: surface stale-pin / allowlist-drift warnings as a
+    // persistent yellow UI banner. Silent fail-open into a fully privileged
+    // state defeats the user's expectation of a sandboxed orchestrator.
+    onUserVisibleWarning: (msg) => {
+      bootWarnings = [...bootWarnings, msg];
+      rerender({ ...state, bootWarnings });
     },
   });
 
-  const spawnTool = createSpawnSubagentTool({
-    registry: spores.registry,
-    activeSpore: () => activeSpore,
-    spawn: (req) => childProcessSpawn(req),
-  });
-  // Wrap spawn_subagent to fit ToolRegistry's Tool<Input> interface.
-  tools.register({
-    name: 'spawn_subagent',
-    description: spawnTool.description,
-    capability: 'coordination' as const,
-    inputSchema: spawnTool.inputSchema,
-    run: async (input, _ctx) => {
-      const result = await spawnTool.handler(input);
-      return JSON.stringify(result);
-    },
-  });
+  // Apply initial allowlist if a spore was already active at boot
+  // (e.g., via prior pin file).
+  if (spores.activeSpore) {
+    setActiveSpore(spores.activeSpore);
+  }
 
   // Per-turn streaming buffers (reset on each `turn_complete` and at the top of
   // every REPL iteration via the runReplSession `onState` callback below).
@@ -297,16 +274,22 @@ async function main(): Promise<void> {
       },
       onActiveSporeChange: (name) => {
         // Phase 21: /spore pin or /spore unpin changed the active spore.
+        // Phase 23: also update the registry allowlist via setActiveSpore.
         if (name === null) {
           uiActiveSpore = null;
           activeSpore = null;
+          setActiveSpore(null);
         } else {
           const rec = spores.registry.get(name);
           if (rec) {
             uiActiveSpore = { name, accent_color: rec.manifest.accent_color };
             activeSpore = name;
           }
+          setActiveSpore(name);
         }
+        // Re-render the system-prompt section to advertise the new spore's commands.
+        const newSection = composeSystemSections({ registry: spores.registry, activeSpore: name });
+        engineRef?.replaceGerminatedSection(newSection);
         // Clear any visible germination card on slash-driven spore changes —
         // the card is for tool-call germination events; manual /spore pin/unpin
         // bypasses that path and shouldn't leave a stale card on screen.

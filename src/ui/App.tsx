@@ -56,6 +56,13 @@ export type AppState = {
    * fixtures without this field continue to pass (treats undefined as null).
    */
   germinationCard?: ActiveSporeState | null;
+  /**
+   * Phase 23 Case 8: security-relevant allowlist drift warnings (stale spore
+   * pin, unknown tool names in allowlist, coordination tools in allowlist).
+   * Rendered as a persistent yellow banner. Optional so legacy test fixtures
+   * without this field continue to pass (treats undefined as empty).
+   */
+  bootWarnings?: string[];
 };
 
 export function App({
@@ -98,6 +105,24 @@ export function App({
   return (
     <Box flexDirection="column" paddingX={1}>
       {banner && <Banner {...banner} />}
+      {/* Phase 23 Case 8: security-relevant boot warnings (stale spore pin,
+          unknown/coordination tools in allowlist). Persistent yellow banner —
+          these are not transient progress messages, they signal a security
+          state the user should be aware of for the entire session. */}
+      {(state.bootWarnings ?? []).length > 0 && (
+        <Box
+          flexDirection="column"
+          borderStyle="single"
+          borderColor="yellow"
+          marginBottom={1}
+          data-testid="boot-warnings-banner"
+        >
+          {(state.bootWarnings ?? []).map((w, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: append-only, stable indices.
+            <Text key={i} color="yellow">{`[!] ${w}`}</Text>
+          ))}
+        </Box>
+      )}
       {state.turns.map((t, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: append-only log, indices are stable.
         <Box key={i} flexDirection="column" marginBottom={1}>

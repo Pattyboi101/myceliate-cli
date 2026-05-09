@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Logger } from '../util/logger.js';
+import { noopLogger } from '../util/noopLogger.js';
 import { SporeRegistry } from './SporeRegistry.js';
 import { readPin } from './pinFile.js';
 import { parseSkillFrontmatter } from './skillFrontmatter.js';
@@ -34,14 +35,8 @@ export async function bootSpores(
     };
   }
 
-  // Provide a no-op logger when none is supplied (e.g. tests that don't pass one)
-  const log: Logger = logger ?? {
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    flush: async () => {},
-  };
+  // Provide a no-op logger when none is supplied (e.g. tests that don't pass one).
+  const log: Logger = logger ?? noopLogger;
 
   const registry = await SporeRegistry.discover(
     {

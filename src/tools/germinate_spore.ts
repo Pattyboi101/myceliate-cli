@@ -5,14 +5,7 @@ import type { SporeRegistry } from '../spores/SporeRegistry.js';
 import { writePin } from '../spores/pinFile.js';
 import { parseSkillFrontmatter } from '../spores/skillFrontmatter.js';
 import type { Logger } from '../util/logger.js';
-
-const noopLogger: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  flush: async () => {},
-};
+import { noopLogger } from '../util/noopLogger.js';
 
 export const GerminateSporeInputSchema = z.object({ name: z.string().min(1) }).strict();
 export type GerminateSporeInput = z.infer<typeof GerminateSporeInputSchema>;

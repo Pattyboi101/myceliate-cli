@@ -139,6 +139,29 @@ describe('slashDispatcher.dispatch', () => {
     }
   });
 
+  it('appends trailing \\n\\n on bare invocation when $ARGUMENTS is absent and args is empty', async () => {
+    // Spec §13: when the placeholder is absent and args is empty, the
+    // unconditional `\n\n + args` append still produces a trailing `\n\n`.
+    // Authors who want bare-invocation cleanliness use $ARGUMENTS explicitly.
+    const { registry, cleanup } = await fixtureRegistry();
+    try {
+      const r = await dispatch('/research:methodology-check', {
+        registry,
+        activeSpore: 'research',
+        cwd: '/tmp',
+        logger: noopLogger,
+      });
+      expect(r.kind).toBe('expanded-prompt');
+      if (r.kind !== 'expanded-prompt') throw new Error('type narrow');
+      expect(r.body).toContain('Check the methodology described below.');
+      expect(r.body.endsWith('\n\n')).toBe(true);
+      // The empty-args append did not introduce any non-whitespace tail content.
+      expect(r.body.replace(/\n+$/, '')).toBe('Check the methodology described below.');
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('refuses with active-spore message when invoked pack is not the active spore', async () => {
     const { registry, cleanup } = await fixtureRegistry();
     try {

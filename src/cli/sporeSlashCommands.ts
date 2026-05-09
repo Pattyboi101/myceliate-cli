@@ -2,14 +2,7 @@
 import type { SporeRegistry } from '../spores/SporeRegistry.js';
 import { clearPin, writePin } from '../spores/pinFile.js';
 import type { Logger } from '../util/logger.js';
-
-const noopLogger: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
-  flush: async () => {},
-};
+import { noopLogger } from '../util/noopLogger.js';
 
 export interface SporeListArgs {
   registry: SporeRegistry;

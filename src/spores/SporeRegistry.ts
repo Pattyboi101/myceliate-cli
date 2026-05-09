@@ -1,3 +1,4 @@
+import type { Dirent } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Logger } from '../util/logger.js';
@@ -143,7 +144,7 @@ export class SporeRegistry {
     logger: Logger,
   ): Promise<CommandRecord[]> {
     const commandsDir = join(dir, 'commands');
-    let commandEntries: import('node:fs').Dirent[];
+    let commandEntries: Dirent[];
     try {
       commandEntries = await readdir(commandsDir, { withFileTypes: true });
     } catch {
@@ -170,9 +171,7 @@ export class SporeRegistry {
           });
           continue;
         }
-        const argumentHint = (frontmatter as Record<string, unknown>)['argument-hint'] as
-          | string
-          | undefined;
+        const argumentHint = frontmatter['argument-hint'];
         out.push({
           name: frontmatter.name,
           description: frontmatter.description,

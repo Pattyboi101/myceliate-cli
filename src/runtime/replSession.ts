@@ -62,6 +62,17 @@ export type ReplSessionOptions = {
 const QUIT_TOKENS = new Set(['/quit', '/exit']);
 
 export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
+  // Phase 22 review fix: the JSDoc on `logger` says it is required when
+  // `sporeRegistry` is provided, but the type is `?:`. This runtime check
+  // makes the contract explicit so a future caller that omits `logger` while
+  // wiring a registry fails fast instead of silently dropping pack-command
+  // dispatch (which would let `/<pack>:<command>` input fall through to the
+  // model as raw text — a quiet correctness regression).
+  if (opts.sporeRegistry !== undefined && opts.logger === undefined) {
+    throw new Error(
+      'replSession: sporeRegistry requires logger (slash dispatcher cannot run without audit logging)',
+    );
+  }
   const engine = new QueryEngine({
     systemPrompt: opts.systemPrompt ?? 'You are myceliate, an autonomous CLI agent.',
     workingBudget: opts.workingBudget ?? 200_000,

@@ -18,7 +18,8 @@ import type { Logger } from '../util/logger.js';
 export type ReplSessionOptions = {
   client: DeepSeekClient;
   tools: ToolRegistry;
-  model: string;
+  /** Optional explicit override; when unset, runReactLoop's role-based dispatch fires. */
+  model?: string;
   cwd: string;
   systemPrompt?: string;
   workingBudget?: number;
@@ -113,7 +114,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
           client: opts.client,
           engine,
           tools: opts.tools,
-          model: opts.model,
+          ...(opts.model ? { model: opts.model } : {}),
           cwd: opts.cwd,
         })) {
           opts.onState(ev);
@@ -174,7 +175,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
       client: opts.client,
       engine,
       tools: opts.tools,
-      model: opts.model,
+      ...(opts.model ? { model: opts.model } : {}),
       cwd: opts.cwd,
     })) {
       opts.onState(ev);

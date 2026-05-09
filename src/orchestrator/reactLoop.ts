@@ -3,6 +3,7 @@ import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { ToolCall } from '../adapters/messages.js';
 import { type StreamEvent, isGermination } from '../adapters/streamEvent.js';
 import type { MarkdownStore } from '../memory/markdownStore.js';
+import { type SporeRole, roleToModel } from '../runtime/roleToModel.js';
 import { redactSecrets } from '../security/redactor.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { QueryEngine } from './QueryEngine.js';
@@ -11,7 +12,8 @@ export type ReactLoopOptions = {
   client: DeepSeekClient;
   engine: QueryEngine;
   tools: ToolRegistry;
-  model: string;
+  /** Optional explicit override; when unset, role-based dispatch fires per iter. */
+  model?: string;
   maxIterations?: number;
   signal?: AbortSignal;
   /** Working directory threaded to every tool invocation. */
@@ -33,8 +35,17 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
   const artifactThreshold = opts.artifactThresholdBytes ?? 4096;
 
   for (let iter = 0; iter < maxIters; iter++) {
+    // Pro if EITHER (a) first iteration (planning bias) OR (b) any prior
+    // tool-call assistant turn carried reasoning_content (R2 ratchet).
+    // Condition (b) becomes permanently true once set — R2 never strips
+    // reasoning from tool-call turns — giving the monotonic Pro-lock
+    // property described in spec §4.1.3.
+    const role: SporeRole =
+      iter === 0 || opts.engine.hasRetainedReasoning() ? 'repl-with-reasoning' : 'repl-execution';
+    const model = opts.model ?? roleToModel(role);
+
     const request = opts.engine.prepareRequest({
-      model: opts.model,
+      model,
       tools: opts.tools.definitions(),
       thinking: true,
       strict: true,

@@ -235,6 +235,56 @@ describe('QueryEngine', () => {
   });
 });
 
+describe('QueryEngine.hasRetainedReasoning()', () => {
+  it('returns false for empty history', () => {
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    expect(engine.hasRetainedReasoning()).toBe(false);
+  });
+
+  it('returns false when only conversational turns have reasoning_content (no tool_calls)', () => {
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    // R2 will drop this reasoning — no tool_calls present
+    engine.appendAssistant({ content: 'final answer', reasoning_content: 'I thought about it' });
+    expect(engine.hasRetainedReasoning()).toBe(false);
+  });
+
+  it('returns true when an assistant turn has both tool_calls and reasoning_content', () => {
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendAssistant({
+      content: '',
+      reasoning_content: 'I should call a tool',
+      tool_calls: [{ id: 't1', name: 'echo', args: {} }],
+    });
+    expect(engine.hasRetainedReasoning()).toBe(true);
+  });
+
+  it('returns false when an assistant turn has tool_calls but no reasoning_content', () => {
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendAssistant({
+      content: '',
+      tool_calls: [{ id: 't1', name: 'echo', args: {} }],
+    });
+    expect(engine.hasRetainedReasoning()).toBe(false);
+  });
+
+  it('returns true iff ANY tool-call turn has reasoning (multi-turn history)', () => {
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    // Turn 1: user
+    engine.appendUser('first');
+    // Turn 2: assistant with tool_calls but NO reasoning
+    engine.appendAssistant({ content: '', tool_calls: [{ id: 't1', name: 'echo', args: {} }] });
+    // Turn 3: tool result
+    engine.appendToolResult({ tool_use_id: 't1', command: 'echo', is_error: false, content: 'ok' });
+    // Turn 4: assistant with tool_calls AND reasoning (this is the one that counts)
+    engine.appendAssistant({
+      content: '',
+      reasoning_content: 'now I have context',
+      tool_calls: [{ id: 't2', name: 'echo', args: {} }],
+    });
+    expect(engine.hasRetainedReasoning()).toBe(true);
+  });
+});
+
 describe('QueryEngine initialHistory (Phase 18 Task 109)', () => {
   it('accepts initialHistory in constructor and exposes via snapshot()', () => {
     const initialHistory: Message[] = [

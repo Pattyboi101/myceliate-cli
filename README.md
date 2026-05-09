@@ -7,6 +7,7 @@ Implements the **Thin Agent / Fat Platform** paradigm: a central orchestrator ma
 ## Architecture (vertical slice — v1)
 
 - **Adapter layer** — strict `DeepSeekClient` interface shaped to V4 (Thinking Mode, `reasoning_content` retention across tool calls, DSML `<|DSML|tool_calls>` parsing, strict-mode JSON Schema). Two adapters behind it: `v3` (works today against `deepseek-reasoner`) and `v4` (DSML state machine, ready to swap in).
+- **Model routing.** Model selection is automatic per call — Anamorph (V4-Flash) for mechanical/subagent loops, Teleomorph (V4-Pro) for strategic and reasoning-active turns. Iteration 0 of every orchestrator REPL turn defaults to Pro (planning bias), then ratchets to Flash on subsequent iterations if no retained reasoning is present. Set `DEEPSEEK_MODEL=<name>` to override globally; an unmissable warn line confirms the bypass at boot.
 - **Background tasks** — heavy I/O (`bash`, `docker build`, test suites) is dispatched to BullMQ jobs backed by Redis. Worker uses `child_process.spawn`, never blocks the main event loop. Notification bridge re-injects results into the ReAct loop.
 - **Memory** — OpenClaw-style file-backed Markdown persistence under `.myceliate/`. Version-controllable, diff-able, no database.
 - **TUI** — Ink for the dual-stream layout (collapsible `<ReasoningBlock>` + final `<ContentStream>`) with incremental Markdown parsing (O(n) streaming). Clack for onboarding (select/confirm).

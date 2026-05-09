@@ -1,7 +1,7 @@
 // src/orchestrator/QueryEngine.ts
 import type { ChatRequest, ToolDefinition } from '../adapters/DeepSeekClient.js';
 import type { AssistantMessage, Message, ToolResult } from '../adapters/messages.js';
-import { hasToolCalls } from '../adapters/messages.js';
+import { hasReasoningContent, hasToolCalls } from '../adapters/messages.js';
 import { BudgetChecker, type BudgetThresholds } from './compaction/budgetChecker.js';
 import { microCompact } from './compaction/microCompactor.js';
 import { snipDeadEnds } from './compaction/snipper.js';
@@ -102,10 +102,23 @@ export class QueryEngine {
     this.history.push({ role: 'tool', result });
   }
 
+  /**
+   * True iff any assistant turn in history has both tool_calls and non-empty
+   * reasoning_content — i.e., R2 will retain that reasoning_content in the
+   * next API request. Used by reactLoop to dispatch repl-with-reasoning.
+   *
+   * Monotonic during a session: once true, stays true (R2 never drops
+   * reasoning from already-tool-call turns). Caller can trust this is a
+   * one-way ratchet; no need to debounce.
+   */
+  hasRetainedReasoning(): boolean {
+    return this.history.some((m) => hasToolCalls(m) && hasReasoningContent(m));
+  }
+
   /** R2: drop reasoning_content from assistant messages without tool_calls. */
   private applyR2(history: readonly Message[]): Message[] {
     return history.map((m) => {
-      if (m.role === 'assistant' && !hasToolCalls(m) && m.reasoning_content) {
+      if (m.role === 'assistant' && !hasToolCalls(m) && hasReasoningContent(m)) {
         // Branch is entered only when !hasToolCalls(m), so we deliberately do NOT
         // copy tool_calls — propagating an empty/missing array would produce an
         // invalid wire shape for both V3 and V4 adapters.

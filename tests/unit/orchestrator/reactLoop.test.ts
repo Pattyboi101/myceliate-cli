@@ -3,13 +3,17 @@
 // F4: per-turn boundary semantics — runReactLoop yields a `turn_complete`
 // event between iterations so consumers can reset per-turn UI state. Without
 // this, multi-turn reasoning panels concatenated turn N's text onto turn N-1.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { DeepSeekClient } from '../../../src/adapters/DeepSeekClient.js';
 import type { StreamEvent, Usage } from '../../../src/adapters/streamEvent.js';
 import { QueryEngine } from '../../../src/orchestrator/QueryEngine.js';
 import { runReactLoop } from '../../../src/orchestrator/reactLoop.js';
 import { ToolRegistry } from '../../../src/tools/registry.js';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 class ScriptedClient implements DeepSeekClient {
   readonly id = 'v3' as const;
@@ -250,6 +254,169 @@ it('yields tool_result with status=failed and a cause when invoke throws', async
   expect(result?.status).toBe('failed');
   expect(result?.id).toBe('t2');
   expect(result?.cause).toBeInstanceOf(Error);
+});
+
+describe('reactLoop — Anamorph routing dispatch', () => {
+  it('fresh engine + iteration 0 dispatches deepseek-v4-pro (planning bias)', async () => {
+    vi.stubEnv('DEEPSEEK_MODEL', '');
+    const capturedRequests: Parameters<DeepSeekClient['stream']>[0][] = [];
+    const recordingClient: DeepSeekClient = {
+      id: 'v3' as const,
+      async *stream(req) {
+        capturedRequests.push(req);
+        yield { type: 'content_delta', text: 'done' };
+        yield { type: 'done', usage: zeroUsage() };
+      },
+    };
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendUser('go');
+    const tools = makeTools();
+    for await (const _ev of runReactLoop({ client: recordingClient, engine, tools })) {
+      // drain
+    }
+    expect(capturedRequests.at(0)?.model).toBe('deepseek-v4-pro');
+    vi.unstubAllEnvs();
+  });
+
+  it('iteration 1 with no retained reasoning demotes to deepseek-v4-flash', async () => {
+    vi.stubEnv('DEEPSEEK_MODEL', '');
+    const capturedRequests: Parameters<DeepSeekClient['stream']>[0][] = [];
+    let call = 0;
+    const recordingClient: DeepSeekClient = {
+      id: 'v3' as const,
+      async *stream(req) {
+        capturedRequests.push(req);
+        call += 1;
+        if (call === 1) {
+          // iter 0: tool call WITHOUT reasoning_content — ratchet should NOT engage
+          yield { type: 'tool_call', id: 't1', name: 'echo', args: { msg: 'x' } };
+          yield { type: 'done', usage: zeroUsage() };
+        } else {
+          yield { type: 'content_delta', text: 'done' };
+          yield { type: 'done', usage: zeroUsage() };
+        }
+      },
+    };
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendUser('go');
+    const tools = makeTools();
+    for await (const _ev of runReactLoop({
+      client: recordingClient,
+      engine,
+      tools,
+      maxIterations: 2,
+    })) {
+      // drain
+    }
+    expect(capturedRequests.at(0)?.model).toBe('deepseek-v4-pro'); // iter 0 — planning bias
+    expect(capturedRequests.at(1)?.model).toBe('deepseek-v4-flash'); // iter 1 — demoted
+    vi.unstubAllEnvs();
+  });
+
+  it('reasoning-retained ratchet stays Pro after iter 0 produces tool_call + reasoning', async () => {
+    vi.stubEnv('DEEPSEEK_MODEL', '');
+    const capturedRequests: Parameters<DeepSeekClient['stream']>[0][] = [];
+    let call = 0;
+    const recordingClient: DeepSeekClient = {
+      id: 'v3' as const,
+      async *stream(req) {
+        capturedRequests.push(req);
+        call += 1;
+        if (call === 1) {
+          // iter 0: reasoning delta AND tool call — ratchet engages
+          yield { type: 'reasoning_delta', text: 'thinking' };
+          yield { type: 'tool_call', id: 't1', name: 'echo', args: { msg: 'x' } };
+          yield { type: 'done', usage: zeroUsage() };
+        } else {
+          yield { type: 'content_delta', text: 'done' };
+          yield { type: 'done', usage: zeroUsage() };
+        }
+      },
+    };
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendUser('go');
+    const tools = makeTools();
+    for await (const _ev of runReactLoop({
+      client: recordingClient,
+      engine,
+      tools,
+      maxIterations: 2,
+    })) {
+      // drain
+    }
+    expect(capturedRequests.at(0)?.model).toBe('deepseek-v4-pro'); // iter 0 — planning bias
+    expect(capturedRequests.at(1)?.model).toBe('deepseek-v4-pro'); // iter 1 — ratchet engaged
+    vi.unstubAllEnvs();
+  });
+
+  it('DEEPSEEK_MODEL env override wins for every iteration', async () => {
+    vi.stubEnv('DEEPSEEK_MODEL', 'test-override');
+    const capturedRequests: Parameters<DeepSeekClient['stream']>[0][] = [];
+    let call = 0;
+    const recordingClient: DeepSeekClient = {
+      id: 'v3' as const,
+      async *stream(req) {
+        capturedRequests.push(req);
+        call += 1;
+        if (call === 1) {
+          yield { type: 'tool_call', id: 't1', name: 'echo', args: { msg: 'x' } };
+          yield { type: 'done', usage: zeroUsage() };
+        } else {
+          yield { type: 'content_delta', text: 'done' };
+          yield { type: 'done', usage: zeroUsage() };
+        }
+      },
+    };
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendUser('go');
+    const tools = makeTools();
+    for await (const _ev of runReactLoop({
+      client: recordingClient,
+      engine,
+      tools,
+      maxIterations: 2,
+    })) {
+      // drain
+    }
+    expect(capturedRequests.at(0)?.model).toBe('test-override');
+    expect(capturedRequests.at(1)?.model).toBe('test-override');
+    vi.unstubAllEnvs();
+  });
+
+  it('explicit opts.model override still works (legacy test-fixture path)', async () => {
+    vi.stubEnv('DEEPSEEK_MODEL', '');
+    const capturedRequests: Parameters<DeepSeekClient['stream']>[0][] = [];
+    let call = 0;
+    const recordingClient: DeepSeekClient = {
+      id: 'v3' as const,
+      async *stream(req) {
+        capturedRequests.push(req);
+        call += 1;
+        if (call === 1) {
+          yield { type: 'tool_call', id: 't1', name: 'echo', args: { msg: 'x' } };
+          yield { type: 'done', usage: zeroUsage() };
+        } else {
+          yield { type: 'content_delta', text: 'done' };
+          yield { type: 'done', usage: zeroUsage() };
+        }
+      },
+    };
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendUser('go');
+    const tools = makeTools();
+    for await (const _ev of runReactLoop({
+      client: recordingClient,
+      engine,
+      tools,
+      model: 'mock',
+      maxIterations: 2,
+    })) {
+      // drain
+    }
+    expect(capturedRequests.at(0)?.model).toBe('mock');
+    expect(capturedRequests.at(1)?.model).toBe('mock');
+    vi.unstubAllEnvs();
+  });
 });
 
 it('yields tool_result with status=rejected when invoke throws an HITL-rejected error', async () => {

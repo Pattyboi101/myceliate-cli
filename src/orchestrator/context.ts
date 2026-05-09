@@ -93,8 +93,12 @@ const DIR_ENTRIES_CAP = 50;
 /**
  * Assemble the system prompt sent to the orchestrator. Combines the project's
  * CLAUDE.md (or a fallback) with a "session ground truth" block carrying the
- * porcelain git status and the cwd top-level listing — both of which
- * `senseContext` runs on every session start but were previously thrown away.
+ * cwd absolute path, the porcelain git status, and the cwd top-level listing.
+ *
+ * The cwd path is load-bearing: without it the model hallucinates Docker /
+ * devcontainer defaults (`/home/user`, `/workspace`) when emitting absolute-
+ * path tool calls (e.g. `read_file('/home/user/CLAUDE.md')`), because the
+ * filename listing alone gives no anchor for where those files actually live.
  *
  * Pure helper so it can be unit-tested without driving `main()`'s side effects.
  */
@@ -106,5 +110,5 @@ export function buildSystemPrompt(ctx: SessionContext): string {
     entries.length > DIR_ENTRIES_CAP
       ? `${entries.slice(0, DIR_ENTRIES_CAP).join(', ')}, ...`
       : entries.join(', ');
-  return `${base}\n\n## session ground truth\ngit status:\n${gitLine}\n\ncwd entries: ${entryList}\n`;
+  return `${base}\n\n## session ground truth\ncwd: ${ctx.cwd}\ngit status:\n${gitLine}\n\ncwd entries: ${entryList}\n`;
 }

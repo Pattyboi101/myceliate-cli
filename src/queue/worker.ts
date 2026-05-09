@@ -1,4 +1,11 @@
 // src/queue/worker.ts
+//
+// BullMQ worker entry point. Two ways this gets invoked:
+//   (1) Indirectly by orchestrator boot via startWorker() in src/runtime/workerLifecycle.ts.
+//       This is the production path; stdio is routed to .myceliate/logs/worker.log.
+//   (2) Manually as `pnpm queue:worker` in a developer terminal when an implementer
+//       wants to see live worker output without the log-file routing layer
+//       (e.g. attaching a debugger, watching stderr in real time).
 import { QueueEvents, Worker } from 'bullmq';
 import { closeRedis, getRedis } from './connection.js';
 import { runBashJob } from './jobs/bashJob.js';

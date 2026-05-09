@@ -14,11 +14,18 @@ Run it before tagging a release. Note any FAIL items as new tasks; do not mark t
 - [ ] `pnpm typecheck` clean
 - [ ] `pnpm lint` clean
 
+### Walk-point 0 — Worker auto-spawn observability (NEW v1.5)
+
+1. Boot myceliate fresh: `myceliate` (no flags).
+2. From another terminal, run: `cat .myceliate/logs/worker.log`
+3. **Expect:** the log file exists and contains the line `[worker] consuming queue: bash (concurrency=4)`.
+4. If the file does not exist or is empty: the worker did not spawn correctly. Check Redis is up (`docker compose ps redis`), then check the orchestrator's stderr for any `[workerLifecycle] spawn error:` line.
+
 ## Worker (terminal A)
 
-The worker subprocess is auto-spawned by `main()` via `startWorker()` (Phase 14 Task 93), but for explicit visibility you can also run it manually:
+Worker is auto-spawned by the orchestrator at boot; check `.myceliate/logs/worker.log` if bash hangs, fails to dispatch, or produces unexpected output. Tail it during smoke as `tail -f .myceliate/logs/worker.log`.
 
-- [ ] `pnpm queue:worker` logs `[worker] consuming queue: bash (concurrency=4)`
+- [ ] After booting myceliate, confirm `.myceliate/logs/worker.log` exists with the worker startup line `[worker] consuming queue: bash (concurrency=4)`.
 - [ ] Worker stays up; ENOENT/EACCES would surface via `[workerLifecycle] spawn error: ...` if pnpm not on PATH
 
 ## CLI smoke (terminal B)
@@ -76,7 +83,7 @@ The worker subprocess is auto-spawned by `main()` via `startWorker()` (Phase 14 
 
 ## Cross-cutting
 
-- [ ] No ANSI corruption when the bash worker logs (worker stdio drained via `.resume()` per Phase 14 m2 fix; U4 preserved)
+- [ ] No ANSI corruption when the bash worker logs (worker stdio routed to `.myceliate/logs/worker.log` per v1.5 Task 4; U4 preserved — Ink never sees worker output)
 - [ ] No Clack-mid-Ink violation (Clack only used in onboarding; per U3)
 - [ ] `Ctrl+C` mid-streaming does not leave orphaned worker subprocesses (Phase 14 Task 93 `shutdown()` SIGTERM-then-SIGKILL handles this)
 - [ ] `Ctrl+D` at the prompt is treated as `/quit`

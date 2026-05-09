@@ -18,6 +18,15 @@ export const SporeManifestSchema = z
     allowed_tools: z
       .array(z.string().min(1, 'allowed_tools entries must be non-empty strings'))
       .optional(),
+    mcp_server: z
+      .object({
+        command: z.string().min(1),
+        args: z.array(z.string()).default([]),
+        env: z.record(z.string(), z.string()).default({}),
+        sensitive_tools: z.array(z.string()).default([]),
+        call_timeout_ms: z.number().int().positive().optional(),
+      })
+      .optional(),
   })
   .strict();
 

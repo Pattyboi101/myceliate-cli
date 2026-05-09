@@ -45,9 +45,10 @@ export interface McpClient {
   listTools(): Promise<McpToolDescriptor[]>;
   callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult>;
   close(): Promise<void>;
-  /** Phase 3 hang-protection / crash-detection: true once the underlying child has
-   *  exited unexpectedly OR a callTool exceeded callTimeoutMs. Subsequent calls
-   *  reject immediately rather than awaiting a dead transport. */
+  /** Phase 3 crash-detection: true once the underlying child has exited unexpectedly.
+   *  Subsequent callTool invocations reject immediately rather than awaiting a dead
+   *  transport. NOTE: a callTimeoutMs timeout does NOT set faulted state — timed-out
+   *  calls are recoverable (the model can retry or change tactic). */
   isFaulted(): boolean;
   /** Phase 3: register a one-shot listener fired when the child exits unexpectedly.
    *  McpLifecycle bridges this to ToolRegistry deregistration + a system-message emit. */
@@ -184,19 +185,6 @@ class McpClientImpl implements McpClient {
       }
     }
 
-    // Hook transport close event BEFORE connect() so we don't miss early exits.
-    // The SDK sets transport.onclose inside connect(); we must chain onto it.
-    // We do this by wrapping transport.onclose after connect resolves — close
-    // events after connect are what we care about (unexpected exit mid-session).
-    //
-    // Note: transport.onclose gives no code/signal (SDK drops them from the
-    // child process 'close' event).  We infer "unexpected" via _closing flag.
-    const originalOnclose = transport.onclose;
-    transport.onclose = () => {
-      originalOnclose?.();
-      this._handleTransportClose({ code: null, signal: null });
-    };
-
     const sdkClient = new Client({ name: 'myceliate', version: '1.0.0' }, { capabilities: {} });
 
     // Wrap the connect() call in a timeout race.
@@ -216,10 +204,10 @@ class McpClientImpl implements McpClient {
       throw err;
     }
 
-    // Re-hook onclose after SDK's connect() has overwritten it (SDK wraps onclose in connect).
-    // SDK chain: protocol._onclose → transport.onclose (our hook from before)
-    // After connect(), the protocol has set transport.onclose to chain into its own _onclose.
-    // We layer on top of that.
+    // After connect() returns, the SDK has installed its own transport.onclose hook;
+    // we wrap it so our _handleTransportClose fires AFTER the SDK's internal cleanup.
+    // Note: transport.onclose gives no code/signal (SDK drops them from the child
+    // process 'close' event).  We infer "unexpected" vs. clean shutdown via _closing flag.
     const chainedOnclose = transport.onclose;
     transport.onclose = () => {
       chainedOnclose?.();

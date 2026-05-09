@@ -122,7 +122,19 @@ accent_color: "#000000"
 mcp_server:
   command: ""
 `;
-    expect(() => parseSporeManifest(yaml)).toThrow();
+    expect(() => parseSporeManifest(yaml)).toThrow(/mcp_server\.command/);
+  });
+
+  it('mcp_server.command absent entirely — fails validation (command is required)', () => {
+    const yaml = `
+name: foo
+description: A spore with mcp_server but no command key.
+version: 1.0.0
+accent_color: "#000000"
+mcp_server:
+  args: []
+`;
+    expect(() => parseSporeManifest(yaml)).toThrow(/mcp_server\.command/);
   });
 
   it('mcp_server.sensitive_tools containing a non-string — fails validation', () => {
@@ -136,7 +148,7 @@ mcp_server:
   sensitive_tools:
     - 42
 `;
-    expect(() => parseSporeManifest(yaml)).toThrow();
+    expect(() => parseSporeManifest(yaml)).toThrow(/sensitive_tools/);
   });
 
   it('mcp_server.call_timeout_ms zero — fails (positive int required)', () => {
@@ -149,7 +161,7 @@ mcp_server:
   command: /usr/bin/mcp
   call_timeout_ms: 0
 `;
-    expect(() => parseSporeManifest(yaml)).toThrow();
+    expect(() => parseSporeManifest(yaml)).toThrow(/call_timeout_ms/);
   });
 
   it('mcp_server.call_timeout_ms negative — fails', () => {
@@ -162,7 +174,7 @@ mcp_server:
   command: /usr/bin/mcp
   call_timeout_ms: -500
 `;
-    expect(() => parseSporeManifest(yaml)).toThrow();
+    expect(() => parseSporeManifest(yaml)).toThrow(/call_timeout_ms/);
   });
 
   it('mcp_server.call_timeout_ms non-integer (1.5) — fails', () => {
@@ -175,7 +187,7 @@ mcp_server:
   command: /usr/bin/mcp
   call_timeout_ms: 1.5
 `;
-    expect(() => parseSporeManifest(yaml)).toThrow();
+    expect(() => parseSporeManifest(yaml)).toThrow(/call_timeout_ms/);
   });
 
   it('unknown top-level key still fails — .strict() preserved (regression for .extend() trap)', () => {
@@ -186,6 +198,6 @@ version: 1.0.0
 accent_color: "#abcdef"
 unknown_top_level_key: should-fail
 `;
-    expect(() => parseSporeManifest(yaml)).toThrow();
+    expect(() => parseSporeManifest(yaml)).toThrow(/Unrecognized key/);
   });
 });

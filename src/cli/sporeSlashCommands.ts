@@ -76,6 +76,13 @@ export async function handleSporeTools(args: SporeToolsArgs): Promise<string> {
   for (const n of coord) lines.push(`  - ${n}`);
   lines.push('');
   lines.push('Execution:');
-  for (const n of exec) lines.push(`  - ${n}`);
+  if (exec.length === 0) {
+    // Phase 23 post-review fix: explicit placeholder for the zero-execution-tools
+    // mode (manifest declared `allowed_tools: []`). An empty section is
+    // ambiguous — could be a render bug or could be intentional. Naming it.
+    lines.push('  (no execution tools)');
+  } else {
+    for (const n of exec) lines.push(`  - ${n}`);
+  }
   return lines.join('\n');
 }

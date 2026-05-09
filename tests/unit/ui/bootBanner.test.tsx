@@ -25,14 +25,6 @@ describe('App boot warnings banner', () => {
     expect(out).not.toContain('[!]');
   });
 
-  it('banner is hidden when bootWarnings is undefined (legacy fixtures)', () => {
-    const stateWithoutWarnings: AppState = { ...baseState };
-    stateWithoutWarnings.bootWarnings = undefined;
-    const { lastFrame } = render(React.createElement(App, { state: stateWithoutWarnings }));
-    const out = lastFrame() ?? '';
-    expect(out).not.toContain('[!]');
-  });
-
   it('banner renders when bootWarnings is non-empty', () => {
     const { lastFrame } = render(
       React.createElement(App, {

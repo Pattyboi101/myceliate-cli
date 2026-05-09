@@ -130,6 +130,7 @@ async function main(): Promise<void> {
     toolCalls: [],
     activeSpore: uiActiveSpore,
     germinationCard: null,
+    bootWarnings: [],
   };
   const banner = {
     model: onboarding.model,
@@ -399,6 +400,7 @@ async function main(): Promise<void> {
           toolCalls: [],
           activeSpore: uiActiveSpore,
           germinationCard: null,
+          bootWarnings,
         });
       },
       readNextPrompt: async () =>
@@ -415,6 +417,7 @@ async function main(): Promise<void> {
             toolCalls: [],
             activeSpore: uiActiveSpore,
             germinationCard: null,
+            bootWarnings,
           });
           return text;
         }),

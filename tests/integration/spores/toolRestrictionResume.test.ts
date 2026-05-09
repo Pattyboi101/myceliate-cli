@@ -44,8 +44,14 @@ function mkSpore(name: string, allowedTools: string[] | undefined): Spore {
   };
 }
 
-describe('Phase 23 integration — --resume across allowlist change', () => {
-  it('rehydrates a session whose history contains tool_calls now denied', async () => {
+describe('Phase 23 integration — allowlist + --resume rehydration gate', () => {
+  // Note: this test exercises the ToolRegistry-level gate (live invoke denies
+  // + ctx.isHistoricalReplay bypasses). v1.4 --resume only reconstructs
+  // message history without re-invoking tools, so the bypass flag is reserved
+  // for future rehydration paths. The session-history rehydration via
+  // ConversationLog.readSession is exercised here as scaffolding to prove
+  // it doesn't crash when historical tool_calls reference now-denied tools.
+  it('live invoke denies allowlist-excluded tools + ctx.isHistoricalReplay bypasses (rehydration path reserved)', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'myc-resume-'));
     try {
       const sessionId = 'test-session';

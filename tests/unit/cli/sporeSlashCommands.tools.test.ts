@@ -52,4 +52,19 @@ describe('handleSporeTools', () => {
     const out = await handleSporeTools({ tools: r, activeSpore: null });
     expect(out).toMatch(/no spore (active|pinned)/i);
   });
+
+  it('shows "(no execution tools)" placeholder when allowlist excludes all execution tools', async () => {
+    // Phase 23 post-review fix: zero-execution-tools mode (allowed_tools: [])
+    // must render an explicit placeholder rather than an empty section.
+    const r = new ToolRegistry();
+    r.register(mkTool('read_file', 'execution'));
+    r.register(mkTool('write_file', 'execution'));
+    r.register(mkTool('germinate_spore', 'coordination'));
+    r.setActiveAllowlist([]);
+    const out = await handleSporeTools({ tools: r, activeSpore: 'minimal' });
+    expect(out).toContain('(no execution tools)');
+    expect(out).toContain('germinate_spore');
+    expect(out).not.toContain('read_file');
+    expect(out).not.toContain('write_file');
+  });
 });

@@ -27,9 +27,16 @@ export type ToolRunContext = {
 
 /** Phase 23: thrown when invoke() is called for a tool not visible to the active
  * spore's allowlist on a live (non-rehydration) turn. The ReAct loop catches
- * this and surfaces a tool error result so the model can recover. */
+ * this and surfaces a tool error result so the model can recover. Carries
+ * `cause` per CLAUDE.md "errors are typed and carry cause" convention,
+ * mirroring SkillFrontmatterError — currently unused (denial is a pure
+ * predicate result, not a wrapped exception) but preserved for future
+ * call sites that want to chain context. */
 export class ToolDeniedByAllowlistError extends Error {
-  constructor(public readonly toolName: string) {
+  constructor(
+    public readonly toolName: string,
+    override readonly cause?: unknown,
+  ) {
     super(`Tool execution denied by active spore allowlist: ${toolName}`);
     this.name = 'ToolDeniedByAllowlistError';
   }
@@ -80,9 +87,11 @@ export class ToolRegistry {
     if (!tool) throw new Error(`Unknown tool: ${name}`);
     // Phase 23 dispatch-layer gate. Defense-in-depth: even if the schema-layer
     // filter is bypassed (model hallucination, future bypass code path), this
-    // gate prevents execution. The intentional bypass for --resume rehydration
-    // is the ctx.isHistoricalReplay flag, which ConversationLog passes through
-    // when reading historical tool_calls.
+    // gate prevents execution. The ctx.isHistoricalReplay bypass is reserved
+    // for future rehydration paths that re-execute historical tool_calls;
+    // v1.4 --resume only reconstructs message history (no invoke), so no
+    // production caller currently sets the flag. The integration test in
+    // toolRestrictionResume validates the bypass works at the registry level.
     if (!ctx?.isHistoricalReplay && !this.isToolAllowed(tool)) {
       throw new ToolDeniedByAllowlistError(name);
     }

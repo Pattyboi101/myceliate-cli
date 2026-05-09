@@ -16,23 +16,23 @@ describe('runOnboarding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
-  it('collects apiKey, adapter, model with defaults applied', async () => {
+  it('collects apiKey + adapter with defaults applied', async () => {
+    // Phase 2: model field removed from OnboardingResult — routing is automatic
+    // per call via roleToModel(). DEEPSEEK_MODEL env override remains for the
+    // banner display + routing escape hatch.
     const result = await runOnboarding({});
     expect(result).toEqual({
       apiKey: 'sk-test-1234567890abcdef',
       adapter: 'v3',
-      model: 'deepseek-reasoner',
     });
   });
   it('skips prompts when defaults are provided', async () => {
     const result = await runOnboarding({
       apiKey: 'sk-default',
       adapter: 'v4',
-      model: 'deepseek-v4-pro',
     });
     expect(result.apiKey).toBe('sk-default');
     expect(result.adapter).toBe('v4');
-    expect(result.model).toBe('deepseek-v4-pro');
   });
   // F2: API key must be collected via masked password() so keystrokes don't
   // echo into terminal scrollback / tmux logs / ssh recordings.

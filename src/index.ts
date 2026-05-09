@@ -64,7 +64,6 @@ async function main(): Promise<void> {
     ...(process.env.DEEPSEEK_ADAPTER === 'v3' || process.env.DEEPSEEK_ADAPTER === 'v4'
       ? { adapter: process.env.DEEPSEEK_ADAPTER }
       : {}),
-    ...(process.env.DEEPSEEK_MODEL ? { model: process.env.DEEPSEEK_MODEL } : {}),
   });
   const memory = new MarkdownStore(ctx.memoryDir);
   const conversation = new ConversationLog(memory, sessionId);
@@ -138,6 +137,8 @@ async function main(): Promise<void> {
     bootWarnings: [],
   };
   const banner = {
+    // Banner display only — mirrors the env-override semantics in
+    // src/runtime/roleToModel.ts (non-empty DEEPSEEK_MODEL bypasses routing).
     model:
       process.env.DEEPSEEK_MODEL && process.env.DEEPSEEK_MODEL.length > 0
         ? process.env.DEEPSEEK_MODEL

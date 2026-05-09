@@ -3,13 +3,17 @@
 // F4: per-turn boundary semantics — runReactLoop yields a `turn_complete`
 // event between iterations so consumers can reset per-turn UI state. Without
 // this, multi-turn reasoning panels concatenated turn N's text onto turn N-1.
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { DeepSeekClient } from '../../../src/adapters/DeepSeekClient.js';
 import type { StreamEvent, Usage } from '../../../src/adapters/streamEvent.js';
 import { QueryEngine } from '../../../src/orchestrator/QueryEngine.js';
 import { runReactLoop } from '../../../src/orchestrator/reactLoop.js';
 import { ToolRegistry } from '../../../src/tools/registry.js';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 class ScriptedClient implements DeepSeekClient {
   readonly id = 'v3' as const;
@@ -257,6 +261,7 @@ describe('reactLoop — Anamorph routing dispatch', () => {
     vi.stubEnv('DEEPSEEK_MODEL', '');
     const capturedRequests: Parameters<DeepSeekClient['stream']>[0][] = [];
     const recordingClient: DeepSeekClient = {
+      id: 'v3' as const,
       async *stream(req) {
         capturedRequests.push(req);
         yield { type: 'content_delta', text: 'done' };
@@ -278,6 +283,7 @@ describe('reactLoop — Anamorph routing dispatch', () => {
     const capturedRequests: Parameters<DeepSeekClient['stream']>[0][] = [];
     let call = 0;
     const recordingClient: DeepSeekClient = {
+      id: 'v3' as const,
       async *stream(req) {
         capturedRequests.push(req);
         call += 1;
@@ -312,6 +318,7 @@ describe('reactLoop — Anamorph routing dispatch', () => {
     const capturedRequests: Parameters<DeepSeekClient['stream']>[0][] = [];
     let call = 0;
     const recordingClient: DeepSeekClient = {
+      id: 'v3' as const,
       async *stream(req) {
         capturedRequests.push(req);
         call += 1;
@@ -347,6 +354,7 @@ describe('reactLoop — Anamorph routing dispatch', () => {
     const capturedRequests: Parameters<DeepSeekClient['stream']>[0][] = [];
     let call = 0;
     const recordingClient: DeepSeekClient = {
+      id: 'v3' as const,
       async *stream(req) {
         capturedRequests.push(req);
         call += 1;
@@ -380,6 +388,7 @@ describe('reactLoop — Anamorph routing dispatch', () => {
     const capturedRequests: Parameters<DeepSeekClient['stream']>[0][] = [];
     let call = 0;
     const recordingClient: DeepSeekClient = {
+      id: 'v3' as const,
       async *stream(req) {
         capturedRequests.push(req);
         call += 1;

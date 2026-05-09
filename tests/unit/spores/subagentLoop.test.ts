@@ -11,11 +11,12 @@ afterEach(() => {
 function recordingClient(): { client: DeepSeekClient; captured: ChatRequest[] } {
   const captured: ChatRequest[] = [];
   const client: DeepSeekClient = {
+    id: 'v3' as const,
     async *stream(req: ChatRequest): AsyncIterable<StreamEvent> {
       captured.push(req);
       // Single-turn conversational reply — no tool calls, terminate immediately.
       yield { type: 'content_delta', text: 'done' };
-      yield { type: 'turn_complete' };
+      yield { type: 'done', usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 } };
     },
   };
   return { client, captured };

@@ -118,7 +118,7 @@ export class QueryEngine {
   /** R2: drop reasoning_content from assistant messages without tool_calls. */
   private applyR2(history: readonly Message[]): Message[] {
     return history.map((m) => {
-      if (m.role === 'assistant' && !hasToolCalls(m) && m.reasoning_content) {
+      if (m.role === 'assistant' && !hasToolCalls(m) && hasReasoningContent(m)) {
         // Branch is entered only when !hasToolCalls(m), so we deliberately do NOT
         // copy tool_calls — propagating an empty/missing array would produce an
         // invalid wire shape for both V3 and V4 adapters.

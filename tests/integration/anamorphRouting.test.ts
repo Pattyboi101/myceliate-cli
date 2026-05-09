@@ -17,10 +17,11 @@ describe('anamorph routing — plumbing reaches the wire', () => {
     vi.stubEnv('DEEPSEEK_MODEL', '');
     const captured: ChatRequest[] = [];
     const client: DeepSeekClient = {
+      id: 'v3' as const,
       async *stream(req): AsyncIterable<StreamEvent> {
         captured.push(req);
         yield { type: 'content_delta', text: 'ack' };
-        yield { type: 'turn_complete' };
+        yield { type: 'done', usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 } };
       },
     };
     await runSubagentLoop({
@@ -36,10 +37,11 @@ describe('anamorph routing — plumbing reaches the wire', () => {
     vi.stubEnv('DEEPSEEK_MODEL', '');
     const captured: ChatRequest[] = [];
     const client: DeepSeekClient = {
+      id: 'v3' as const,
       async *stream(req): AsyncIterable<StreamEvent> {
         captured.push(req);
         yield { type: 'content_delta', text: 'ack' };
-        yield { type: 'turn_complete' };
+        yield { type: 'done', usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 } };
       },
     };
     const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 200_000 });
@@ -56,6 +58,7 @@ describe('anamorph routing — plumbing reaches the wire', () => {
     let call = 0;
     const captured: ChatRequest[] = [];
     const client: DeepSeekClient = {
+      id: 'v3' as const,
       async *stream(req): AsyncIterable<StreamEvent> {
         captured.push(req);
         call += 1;
@@ -63,10 +66,16 @@ describe('anamorph routing — plumbing reaches the wire', () => {
           // Iter 0: produce a tool call WITHOUT reasoning_content. Reasoning ratchet
           // should NOT engage (hasRetainedReasoning checks for tool_calls AND reasoning).
           yield { type: 'tool_call', id: 't1', name: 'noop', args: {} };
-          yield { type: 'turn_complete' };
+          yield {
+            type: 'done',
+            usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 },
+          };
         } else {
           yield { type: 'content_delta', text: 'done' };
-          yield { type: 'turn_complete' };
+          yield {
+            type: 'done',
+            usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 },
+          };
         }
       },
     };
@@ -92,16 +101,23 @@ describe('anamorph routing — plumbing reaches the wire', () => {
     let call = 0;
     const captured: ChatRequest[] = [];
     const client: DeepSeekClient = {
+      id: 'v3' as const,
       async *stream(req): AsyncIterable<StreamEvent> {
         captured.push(req);
         call += 1;
         if (call === 1) {
           yield { type: 'reasoning_delta', text: 'thinking deeply' };
           yield { type: 'tool_call', id: 't1', name: 'noop', args: {} };
-          yield { type: 'turn_complete' };
+          yield {
+            type: 'done',
+            usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 },
+          };
         } else {
           yield { type: 'content_delta', text: 'done' };
-          yield { type: 'turn_complete' };
+          yield {
+            type: 'done',
+            usage: { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 },
+          };
         }
       },
     };

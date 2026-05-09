@@ -4,7 +4,6 @@ import { cancel, intro, isCancel, outro, password, select } from '@clack/prompts
 export type OnboardingResult = {
   apiKey: string;
   adapter: 'v3' | 'v4';
-  model: string;
 };
 
 /**
@@ -41,7 +40,6 @@ async function promptSelect<T extends string>(opts: {
 export async function runOnboarding(defaults: {
   apiKey?: string;
   adapter?: 'v3' | 'v4';
-  model?: string;
 }): Promise<OnboardingResult> {
   intro('myceliate-cli — autonomous DeepSeek agent');
 
@@ -62,8 +60,6 @@ export async function runOnboarding(defaults: {
       ],
     }));
 
-  const model = defaults.model ?? (adapter === 'v3' ? 'deepseek-reasoner' : 'deepseek-v4-pro');
-
   outro('Launching agent…');
-  return { apiKey, adapter, model };
+  return { apiKey, adapter };
 }

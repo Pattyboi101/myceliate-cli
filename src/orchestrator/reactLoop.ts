@@ -35,9 +35,11 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
   const artifactThreshold = opts.artifactThresholdBytes ?? 4096;
 
   for (let iter = 0; iter < maxIters; iter++) {
-    // Iteration 0 always Pro (planning bias — see spec §4.1.3); subsequent
-    // iterations ratchet on retained reasoning_content per R2. Once Pro,
-    // stays Pro within the session (monotonic rule).
+    // Pro if EITHER (a) first iteration (planning bias) OR (b) any prior
+    // tool-call assistant turn carried reasoning_content (R2 ratchet).
+    // Condition (b) becomes permanently true once set — R2 never strips
+    // reasoning from tool-call turns — giving the monotonic Pro-lock
+    // property described in spec §4.1.3.
     const role: SporeRole =
       iter === 0 || opts.engine.hasRetainedReasoning() ? 'repl-with-reasoning' : 'repl-execution';
     const model = opts.model ?? roleToModel(role);

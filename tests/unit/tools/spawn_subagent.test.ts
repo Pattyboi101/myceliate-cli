@@ -5,6 +5,15 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import { createSpawnSubagentTool } from '../../../src/tools/spawn_subagent.js';
+import type { Logger } from '../../../src/util/logger.js';
+
+const noopLogger: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  flush: async () => {},
+};
 
 async function buildFixtureSporeWithPersona(
   root: string,
@@ -44,11 +53,10 @@ describe('spawn_subagent tool', () => {
     const bundledDir = join(workspace, 'bundled');
     await mkdir(bundledDir, { recursive: true });
     await buildFixtureSporeWithPersona(bundledDir, 'demo', 'real');
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
 
     const tool = createSpawnSubagentTool({
       registry,
@@ -64,11 +72,10 @@ describe('spawn_subagent tool', () => {
     const bundledDir = join(workspace, 'bundled');
     await mkdir(bundledDir, { recursive: true });
     await buildFixtureSporeWithPersona(bundledDir, 'demo', 'real');
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
 
     let received: { persona_skill: string; task: string } | null = null;
     const tool = createSpawnSubagentTool({
@@ -94,11 +101,10 @@ describe('spawn_subagent tool', () => {
     const bundledDir = join(workspace, 'bundled');
     await mkdir(bundledDir, { recursive: true });
     await buildFixtureSporeWithPersona(bundledDir, 'demo', 'real');
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
 
     const tool = createSpawnSubagentTool({
       registry,

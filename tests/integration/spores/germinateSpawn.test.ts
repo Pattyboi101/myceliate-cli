@@ -8,6 +8,15 @@ import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import { readPin } from '../../../src/spores/pinFile.js';
 import { createGerminateSporeTool } from '../../../src/tools/germinate_spore.js';
 import { createSpawnSubagentTool } from '../../../src/tools/spawn_subagent.js';
+import type { Logger } from '../../../src/util/logger.js';
+
+const noopLogger: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  flush: async () => {},
+};
 
 describe('integration: germinate -> spawn end-to-end', () => {
   let workspace: string;
@@ -45,11 +54,10 @@ describe('integration: germinate -> spawn end-to-end', () => {
   });
 
   it('full flow: germinate biz, spawn ceo, receive summary', async () => {
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
 
     const events: Array<unknown> = [];
     let appended = '';
@@ -89,7 +97,7 @@ describe('integration: germinate -> spawn end-to-end', () => {
     }
 
     // Step 3: side effects
-    expect(await readPin(cwd)).toBe('biz');
+    expect(await readPin(cwd, noopLogger)).toBe('biz');
     expect(appended).toMatch(/Biz body/);
     expect(events).toContainEqual(
       expect.objectContaining({ type: 'germination', spore: 'biz', accent_color: '#c5a45f' }),
@@ -97,11 +105,10 @@ describe('integration: germinate -> spawn end-to-end', () => {
   });
 
   it('stretch: double germination with replaceGerminatedSection only keeps the second body', async () => {
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
 
     // Build a second spore fixture in the same bundledDir
     const dir2 = join(bundledDir, 'biz2');
@@ -123,11 +130,10 @@ describe('integration: germinate -> spawn end-to-end', () => {
     );
 
     // Re-discover to pick up biz2
-    const registry2 = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry2 = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
 
     const engine = new QueryEngine({
       systemPrompt: 'Base system prompt.',
@@ -168,11 +174,10 @@ describe('integration: germinate -> spawn end-to-end', () => {
   });
 
   it('C1 regression: QueryEngine.appendSystemSection propagates germinated body into next prepareRequest', async () => {
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
 
     // 1. Build a real QueryEngine with a known initial system prompt.
     const engine = new QueryEngine({

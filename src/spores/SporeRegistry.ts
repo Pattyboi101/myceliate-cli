@@ -1,5 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Logger } from '../util/logger.js';
+import type { CommandRecord } from './CommandRecord.js';
 import type { PersonaRef, Spore, SporeTier } from './Spore.js';
 import { parseSporeManifest } from './SporeManifest.js';
 import { parseSkillFrontmatter } from './skillFrontmatter.js';
@@ -8,6 +10,10 @@ export interface RegistryDirs {
   bundledDir: string;
   userDir: string;
   projectDir: string;
+}
+
+export interface RegistryDiscoverOpts {
+  logger: Logger;
 }
 
 export interface SporeDescription {
@@ -19,7 +25,7 @@ export interface SporeDescription {
 export class SporeRegistry {
   private constructor(private readonly spores: Map<string, Spore>) {}
 
-  static async discover(dirs: RegistryDirs): Promise<SporeRegistry> {
+  static async discover(dirs: RegistryDirs, opts: RegistryDiscoverOpts): Promise<SporeRegistry> {
     const accumulated = new Map<string, Spore>();
     const tierDirs: Array<[SporeTier, string]> = [
       ['bundled', dirs.bundledDir],
@@ -27,14 +33,18 @@ export class SporeRegistry {
       ['project', dirs.projectDir],
     ];
     for (const [tier, root] of tierDirs) {
-      const found = await SporeRegistry.scanTier(tier, root);
+      const found = await SporeRegistry.scanTier(tier, root, opts.logger);
       for (const spore of found) {
         const existing = accumulated.get(spore.name);
         if (existing) {
-          // TODO(v1.4): thread Logger via DI per CLAUDE.md U4
-          console.warn(
-            `[spores] override: ${spore.name} from ${existing.tier} (${existing.dir}) replaced by ${spore.tier} (${spore.dir})`,
-          );
+          opts.logger.warn({
+            event: 'spore_override',
+            name: spore.name,
+            from_tier: existing.tier,
+            from_dir: existing.dir,
+            to_tier: spore.tier,
+            to_dir: spore.dir,
+          });
         }
         accumulated.set(spore.name, spore);
       }
@@ -42,7 +52,21 @@ export class SporeRegistry {
     return new SporeRegistry(accumulated);
   }
 
-  private static async scanTier(tier: SporeTier, root: string): Promise<Spore[]> {
+  static empty(): SporeRegistry {
+    return new SporeRegistry(new Map());
+  }
+
+  /**
+   * Test-only factory: build a registry from a flat Spore[] without disk I/O.
+   * Production code uses discover(); tests use fromList() to avoid fixture sprawl.
+   */
+  static fromList(spores: Spore[]): SporeRegistry {
+    const map = new Map<string, Spore>();
+    for (const s of spores) map.set(s.name, s);
+    return new SporeRegistry(map);
+  }
+
+  private static async scanTier(tier: SporeTier, root: string, logger: Logger): Promise<Spore[]> {
     let entries: string[];
     try {
       const dirEntries = await readdir(root, { withFileTypes: true });
@@ -57,17 +81,21 @@ export class SporeRegistry {
     for (const name of entries) {
       const dir = join(root, name);
       try {
-        const spore = await SporeRegistry.loadSpore(tier, dir, name);
+        const spore = await SporeRegistry.loadSpore(tier, dir, name, logger);
         out.push(spore);
       } catch (err) {
-        // TODO(v1.4): thread Logger via DI per CLAUDE.md U4
-        console.warn(`[spores] skipped ${tier}/${name}: ${(err as Error).message}`);
+        logger.warn({
+          event: 'spore_load_skipped',
+          tier,
+          name,
+          message: (err as Error).message,
+        });
       }
     }
     return out;
   }
 
-  private static async loadSpore(tier: SporeTier, dir: string, name: string): Promise<Spore> {
+  private static async loadSpore(tier: SporeTier, dir: string, name: string, logger: Logger): Promise<Spore> {
     const manifestPath = join(dir, 'myceliate.yaml');
     const sectorSkillPath = join(dir, 'SKILL.md');
     const manifestRaw = await readFile(manifestPath, 'utf8');
@@ -89,10 +117,68 @@ export class SporeRegistry {
           description: frontmatter.description,
         });
       } catch (err) {
-        console.warn(`[spores] persona ${name}/${agentName} skipped: ${(err as Error).message}`);
+        logger.warn({
+          event: 'persona_load_skipped',
+          spore: name,
+          agent: agentName,
+          message: (err as Error).message,
+        });
       }
     }
-    return { name, tier, dir, manifest, sectorFrontmatter, sectorSkillPath, personas };
+
+    // Per-pack commands discovery — walks commands/*.md
+    const commands = await SporeRegistry.loadCommands(dir, name, logger);
+
+    return { name, tier, dir, manifest, sectorFrontmatter, sectorSkillPath, personas, commands };
+  }
+
+  private static async loadCommands(dir: string, sporeName: string, logger: Logger): Promise<CommandRecord[]> {
+    const commandsDir = join(dir, 'commands');
+    let commandEntries: import('node:fs').Dirent[];
+    try {
+      commandEntries = await readdir(commandsDir, { withFileTypes: true });
+    } catch {
+      // commands/ absent — that's fine, leave commands empty.
+      return [];
+    }
+
+    const out: CommandRecord[] = [];
+
+    for (const entry of commandEntries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith('.md')) continue;
+      const cmdPath = join(commandsDir, entry.name);
+      const basename = entry.name.slice(0, -3); // strip .md
+      try {
+        const raw = await readFile(cmdPath, 'utf8');
+        const { frontmatter } = parseSkillFrontmatter(raw);
+        if (frontmatter.name !== basename) {
+          logger.warn({
+            event: 'command_filename_mismatch',
+            spore: sporeName,
+            file: entry.name,
+            frontmatter_name: frontmatter.name,
+          });
+          continue;
+        }
+        const argumentHint = (frontmatter as Record<string, unknown>)['argument-hint'] as string | undefined;
+        out.push({
+          name: frontmatter.name,
+          description: frontmatter.description,
+          ...(argumentHint ? { argumentHint } : {}),
+          bodyPath: cmdPath,
+        });
+      } catch (err) {
+        logger.warn({
+          event: 'command_load_skipped',
+          spore: sporeName,
+          file: entry.name,
+          message: (err as Error).message,
+        });
+      }
+    }
+
+    return out;
   }
 
   list(): Spore[] {

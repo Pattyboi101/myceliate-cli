@@ -10,6 +10,15 @@ import {
 } from '../../../src/cli/sporeSlashCommands.js';
 import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import { readPin } from '../../../src/spores/pinFile.js';
+import type { Logger } from '../../../src/util/logger.js';
+
+const noopLogger: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  flush: async () => {},
+};
 
 let workspace: string;
 let bundledDir: string;
@@ -45,11 +54,10 @@ afterEach(async () => {
 
 describe('spore slash commands', () => {
   it('/spore list prints the catalog with tier annotations', async () => {
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
     const out = await handleSporeList({ registry });
     expect(out).toMatch(/biz/);
     expect(out).toMatch(/bundled/);
@@ -57,36 +65,33 @@ describe('spore slash commands', () => {
   });
 
   it('/spore pin <name> writes the pin file', async () => {
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
     const result = await handleSporePin({ registry, cwd, name: 'biz' });
     expect(result.ok).toBe(true);
-    expect(await readPin(cwd)).toBe('biz');
+    expect(await readPin(cwd, noopLogger)).toBe('biz');
   });
 
   it('/spore pin <unknown> rejects', async () => {
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
     const result = await handleSporePin({ registry, cwd, name: 'nope' });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.message).toMatch(/unknown/);
   });
 
   it('/spore unpin removes the pin file', async () => {
-    const registry = await SporeRegistry.discover({
-      bundledDir,
-      userDir: '/none',
-      projectDir: '/none',
-    });
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
     await handleSporePin({ registry, cwd, name: 'biz' });
     const result = await handleSporeUnpin({ cwd });
     expect(result.ok).toBe(true);
-    expect(await readPin(cwd)).toBeNull();
+    expect(await readPin(cwd, noopLogger)).toBeNull();
   });
 });

@@ -2,6 +2,12 @@
   "name": "myceliate-cli",
   "version": "0.1.0",
   "description": "Autonomous DeepSeek V4 CLI agent. Thin Agent / Fat Platform architecture.",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Pattyboi101/myceliate-cli.git"
+  },
   "type": "module",
   "bin": {
     "myceliate": "bin/myceliate.mjs"

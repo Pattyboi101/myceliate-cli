@@ -158,12 +158,15 @@ export function App({
               expanded={cardExpanded && i === state.toolCalls.length - 1}
             />
           ))}
-          {/* Phase 21: show GerminationCard inline when a germination event arrived this turn */}
+          {/* Phase 21: show GerminationCard inline when a germination event arrived this turn.
+              Phase 24 Task 1: card collapses to a one-line summary on first content_delta
+              (i.e. once `state.content.length > 0`). Closes spec §7.2 deviation. */}
           {state.germinationCard && (
             <GerminationCard
               spore={state.germinationCard.name}
               accent_color={state.germinationCard.accent_color}
               message={`Germinating ${state.germinationCard.name} spore`}
+              collapsed={state.content.length > 0}
             />
           )}
           {state.content.length > 0 && <ContentStream text={state.content} />}

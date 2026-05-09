@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { Queue, QueueEvents } from 'bullmq';
 import { z } from 'zod';
 import type { BashJobData, BashJobReturn } from '../queue/queues.js';
+import type { WorkerHandle } from '../runtime/workerLifecycle.js';
 import type { HitlGate } from '../security/hitlGate.js';
 import type { Tool } from './registry.js';
 
@@ -17,6 +18,7 @@ export type BashToolDeps = {
   hitl: HitlGate;
   queue: Queue<BashJobData, BashJobReturn>;
   queueEvents: QueueEvents;
+  worker: WorkerHandle;
   defaultTimeoutMs?: number;
 };
 
@@ -85,8 +87,17 @@ export function createBashTool(deps: BashToolDeps): Tool<BashInput> {
         },
         { jobId: toolUseId },
       );
-      const result = await job.waitUntilFinished(deps.queueEvents);
-      return formatResult(result);
+      let crashReject!: (err: Error) => void;
+      const crashPromise = new Promise<never>((_, reject) => {
+        crashReject = reject;
+      });
+      deps.worker.trackJob(toolUseId, crashReject);
+      try {
+        const result = await Promise.race([job.waitUntilFinished(deps.queueEvents), crashPromise]);
+        return formatResult(result);
+      } finally {
+        deps.worker.releaseJob(toolUseId);
+      }
     },
   };
 }

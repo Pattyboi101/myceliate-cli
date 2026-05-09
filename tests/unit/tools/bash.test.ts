@@ -1,7 +1,16 @@
 // tests/unit/tools/bash.test.ts
 import { describe, expect, it, vi } from 'vitest';
+import { WorkerCrashedError } from '../../../src/runtime/workerLifecycle.js';
 import { HitlGate } from '../../../src/security/hitlGate.js';
+import type { BashToolDeps } from '../../../src/tools/bash.js';
 import { createBashTool } from '../../../src/tools/bash.js';
+
+const stubWorker: BashToolDeps['worker'] = {
+  child: {} as never,
+  trackJob: () => {},
+  releaseJob: () => {},
+  shutdown: async () => {},
+};
 
 describe('bashTool', () => {
   function fakeQueue(behaviour: 'success' | 'fail') {
@@ -22,6 +31,7 @@ describe('bashTool', () => {
       hitl,
       queue: queue as never,
       queueEvents: {} as never,
+      worker: stubWorker,
       defaultTimeoutMs: 1000,
     });
     const out = await tool.run(
@@ -42,6 +52,7 @@ describe('bashTool', () => {
       hitl,
       queue: queue as never,
       queueEvents: {} as never,
+      worker: stubWorker,
       defaultTimeoutMs: 1000,
     });
     await expect(
@@ -62,6 +73,7 @@ describe('bashTool', () => {
       hitl,
       queue: queue as never,
       queueEvents: {} as never,
+      worker: stubWorker,
       defaultTimeoutMs: 1000,
     });
     await tool.run(
@@ -82,6 +94,7 @@ describe('bashTool', () => {
       hitl,
       queue: queue as never,
       queueEvents: {} as never,
+      worker: stubWorker,
       defaultTimeoutMs: 1000,
     });
     await expect(
@@ -91,5 +104,49 @@ describe('bashTool', () => {
       ),
     ).rejects.toThrow(/worker exploded/);
     expect(queue.add).toHaveBeenCalledOnce();
+  });
+});
+
+describe('bash tool — worker crash detection', () => {
+  it('rejects with WorkerCrashedError when the worker crashes mid-dispatch', async () => {
+    let registeredReject!: (err: Error) => void;
+    const trackJob = vi.fn((_: string, reject: (err: Error) => void) => {
+      registeredReject = reject;
+    });
+    const releaseJob = vi.fn();
+
+    const fakeJob = {
+      waitUntilFinished: vi.fn(
+        () =>
+          new Promise(() => {
+            /* never resolves */
+          }),
+      ),
+    };
+
+    const deps: BashToolDeps = {
+      hitl: { checkBash: async () => ({ allowed: true }) } as never,
+      queue: { add: vi.fn().mockResolvedValue(fakeJob) } as never,
+      queueEvents: {} as never,
+      worker: {
+        child: {} as never,
+        trackJob,
+        releaseJob,
+        shutdown: async () => {},
+      },
+      defaultTimeoutMs: 30_000,
+    };
+
+    const tool = createBashTool(deps);
+    const dispatchPromise = tool.run({ command: 'echo hi', cwd: '', timeoutMs: 0 }, {
+      cwd: '/tmp',
+      toolUseId: 'test-id',
+    } as never);
+
+    // Simulate worker crash by invoking the registered rejecter
+    setTimeout(() => registeredReject(new WorkerCrashedError(1, null)), 5);
+
+    await expect(dispatchPromise).rejects.toThrow(WorkerCrashedError);
+    expect(releaseJob).toHaveBeenCalledWith(expect.any(String));
   });
 });

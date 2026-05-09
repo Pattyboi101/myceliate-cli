@@ -22,9 +22,17 @@ pnpm install        # or npm install
 cp .env.example .env
 # Add DEEPSEEK_API_KEY to .env
 pnpm redis:up       # start Redis via docker compose
-pnpm queue:worker   # in one terminal — runs the BullMQ consumer
-pnpm dev            # in another — runs the agent
+pnpm dev            # runs the agent — worker is auto-spawned
 ```
+
+### Worker process lifecycle
+
+The orchestrator owns the BullMQ worker process lifecycle. At boot, `myceliate`
+runs a Redis pre-flight ping (fail-fast with a clean diagnostic if Redis is
+down), spawns `pnpm queue:worker` as a managed child process, routes its
+stdout/stderr to `.myceliate/logs/worker.log`, and tears it down on orchestrator
+exit via SIGTERM → 2s wait → SIGKILL escalation. If a bash command hangs or
+fails unexpectedly, tail the worker log: `tail -f .myceliate/logs/worker.log`.
 
 ## Deferred to v2
 

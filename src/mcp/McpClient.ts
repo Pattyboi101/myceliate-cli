@@ -55,6 +55,19 @@ export interface McpClient {
   onUnexpectedExit(
     handler: (info: { code: number | null; signal: NodeJS.Signals | null }) => void,
   ): void;
+  /**
+   * Phase 3 (McpLifecycle): returns the PID of the underlying child process, or
+   * null if the transport has not been started yet or the child has already exited.
+   *
+   * The SDK's StdioClientTransport exposes `get pid()` as a public API — this is
+   * NOT an escape-hatch into internals.  McpLifecycle uses the PID for the
+   * SIGTERM → SIGKILL escalation pattern that mirrors workerLifecycle.ts.
+   *
+   * PID-access decision (T24): Option (b) — expose via McpClient interface rather
+   * than (a) spawning our own child, (c) relying solely on transport.close(), or
+   * (d) poking a private `_process` field.
+   */
+  getChildPid(): number | null;
 }
 
 export class McpServerCrashedError extends Error {
@@ -281,6 +294,12 @@ class McpClientImpl implements McpClient {
     }
     this._sdkClient = null;
     this._logger.debug({ msg: 'McpClient: closed', server: this._serverName });
+  }
+
+  getChildPid(): number | null {
+    // StdioClientTransport.pid is a public getter (verified in SDK dist/esm/client/stdio.js).
+    // Returns undefined → null coercion when the process hasn't started or has already exited.
+    return this._transport?.pid ?? null;
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────────

@@ -21,6 +21,9 @@ const AUTO_GEN_MARKER =
 
 const MAX_FM_DESC_LEN = 200;
 
+const introSentence = (command: string): string =>
+  `The platform manages the underlying MCP server lifecycle (${command}). You invoke high-level primitives; the platform speaks the wire protocol.`;
+
 export interface TranslationResult {
   /** Full SKILL.md body (without frontmatter — frontmatter is generated separately
    *  from the manifest). Contains the auto-gen marker per §5.1.2. */
@@ -44,7 +47,7 @@ export function translateMcpSchema(
   // Edge case: no tools discovered.
   if (tools.length === 0) {
     logger.warn({ msg: 'SchemaTranslator: no tools returned by MCP server', spore: sporeName });
-    const skillBody = `# ${manifest.name}\n\n${manifest.description}\n\nThe platform manages the underlying MCP server lifecycle (${command}). You invoke high-level primitives; the platform speaks the wire protocol.\n\n*No capabilities discovered — the MCP server returned an empty tools list.*\n\n${AUTO_GEN_MARKER}\n`;
+    const skillBody = `# ${manifest.name}\n\n${manifest.description}\n\n${introSentence(command)}\n\n*No capabilities discovered — the MCP server returned an empty tools list.*\n\n${AUTO_GEN_MARKER}\n`;
     return {
       skillBody,
       commandFiles: new Map(),
@@ -63,7 +66,7 @@ export function translateMcpSchema(
     capabilityLines.push(hierarchy ? `${line}\n${hierarchy}` : line);
   }
 
-  let skillBody = `# ${manifest.name}\n\n${manifest.description}\n\nThe platform manages the underlying MCP server lifecycle (${command}). You invoke high-level primitives; the platform speaks the wire protocol.\n\n## Capabilities\n\n${capabilityLines.join('\n\n')}\n`;
+  let skillBody = `# ${manifest.name}\n\n${manifest.description}\n\n${introSentence(command)}\n\n## Capabilities\n\n${capabilityLines.join('\n\n')}\n`;
 
   // Sensitive operations section — only if non-empty intersection.
   const sensitiveInManifest = [...sensitiveTools].filter((t) =>

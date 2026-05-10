@@ -171,7 +171,7 @@ describe('SchemaTranslator.translateMcpSchema', () => {
   });
 
   describe('tool with no args', () => {
-    it('renders without an arg section (no "No arguments" text) for empty required', () => {
+    it('renders "No arguments required." prose instead of an Arguments: section when properties is empty', () => {
       const tools: McpToolDescriptor[] = [
         {
           name: 'ping',
@@ -223,9 +223,9 @@ describe('SchemaTranslator.translateMcpSchema', () => {
       const skillBody = result.skillBody;
       // The capability line should show the top-level arg
       expect(skillBody).toContain('itemstore_create-item(payload: object)');
-      // The hierarchy should show nested properties indented
-      expect(skillBody).toContain('  - `title`');
-      expect(skillBody).toContain('  - `count`');
+      // The hierarchy should show nested properties indented at depth-2 (4 spaces = 2 levels × 2 spaces)
+      expect(skillBody).toContain('    - `title`');
+      expect(skillBody).toContain('    - `count`');
     });
   });
 

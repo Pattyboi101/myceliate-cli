@@ -1,0 +1,10 @@
+name: fetcher
+description: A spore that fetches web content via an MCP server.
+version: 0.1.0
+accent_color: '#000000'
+mcp_server:
+  command: npx
+  args:
+    - fake
+  env: {}
+  sensitive_tools: []

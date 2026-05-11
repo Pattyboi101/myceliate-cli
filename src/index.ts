@@ -15,6 +15,7 @@ import {
   isError,
   isGermination,
   isReasoningDelta,
+  isSystemMessage,
   isToolCall,
   isToolResult,
   isTurnComplete,
@@ -231,6 +232,11 @@ async function main(): Promise<void> {
         // Phase 21: set germinationCard so <GerminationCard> renders in-stream.
         rerender({ ...state, activeSpore: uiActiveSpore, germinationCard: uiActiveSpore });
         logger.info({ event: 'germination', spore: ev.spore });
+      } else if (isSystemMessage(ev)) {
+        // Phase 3: route MCP teardown / crash notifications into chat so the user
+        // sees a line when their MCP server dies or is explicitly unpinned.
+        const newTurn: CompletedTurn = { userInput: '', content: ev.text };
+        rerender({ ...state, turns: [...state.turns, newTurn] });
       }
     },
     appendSystemPrompt: (section) => {
@@ -303,16 +309,9 @@ async function main(): Promise<void> {
         // Phase 21: /spore pin or /spore unpin changed the active spore.
         // Phase 23: also update the registry allowlist via setActiveSpore.
         if (name === null) {
-          const prev = activeSpore;
           uiActiveSpore = null;
           activeSpore = null;
           setActiveSpore(null);
-          if (prev !== null) {
-            // Phase 3 (T29): onActiveSporeChange is typed void (sync Ink callback — cannot await).
-            // Fire-and-forget is the only option here; errors are swallowed by teardownMcpSpore's
-            // own defensive path (T27 pattern — see bootTools.ts teardownMcpSpore).
-            void teardownMcpSpore(prev);
-          }
         } else {
           const rec = spores.registry.get(name);
           if (rec) {

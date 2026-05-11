@@ -92,3 +92,7 @@ export const isTurnComplete = (
   e: StreamEvent,
 ): e is Extract<StreamEvent, { type: 'turn_complete' }> =>
   'type' in e && e.type === 'turn_complete';
+export const isSystemMessage = (
+  e: StreamEvent,
+): e is Extract<StreamEvent, { type: 'system_message' }> =>
+  'type' in e && e.type === 'system_message';

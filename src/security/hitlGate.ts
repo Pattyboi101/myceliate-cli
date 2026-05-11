@@ -73,6 +73,15 @@ export type WriteCheck = { path: string; cwd: string; requestId: string };
 /** Input shape for `HitlGate.checkRead` (v1.5 Cortina). */
 export type ReadCheck = { path: string; requestId: string };
 
+/** Input shape for `HitlGate.checkMcp` (Phase 3). */
+export type McpCheck = {
+  requestId: string;
+  server: string;
+  tool: string;
+  argsSummary: string;
+  reason: string;
+};
+
 /**
  * Discriminated union result from any `HitlGate` check method (checkBash,
  * checkWrite, checkRead).
@@ -208,13 +217,7 @@ export class HitlGate {
    * caller (germinate_spore) is responsible for deciding which MCP tools
    * require HITL; once routed here the user must always approve.
    */
-  async checkMcp(input: {
-    requestId: string;
-    server: string;
-    tool: string;
-    argsSummary: string;
-    reason: string;
-  }): Promise<Verdict> {
+  async checkMcp(input: McpCheck): Promise<Verdict> {
     const response = await this.opts.requestApproval({
       kind: 'mcp',
       requestId: input.requestId,

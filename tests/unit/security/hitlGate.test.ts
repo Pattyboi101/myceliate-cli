@@ -1,6 +1,10 @@
 // tests/unit/security/hitlGate.test.ts
 import { describe, expect, it, vi } from 'vitest';
-import { HitlGate } from '../../../src/security/hitlGate.js';
+import {
+  type ApprovalRequest,
+  type ApprovalRequester,
+  HitlGate,
+} from '../../../src/security/hitlGate.js';
 
 describe('HitlGate', () => {
   // --- Plan-specified tests ---
@@ -177,29 +181,31 @@ describe('HitlGate', () => {
   });
 
   it('checkWrite passes kind:"write" and path field (not command) in the ApprovalRequest', async () => {
-    let observedReq: { kind?: string; path?: string } | undefined;
-    const hitl = new HitlGate({
-      requestApproval: async (req) => {
-        observedReq = req as unknown as { kind?: string; path?: string };
-        return { decision: 'approve' };
-      },
-    });
+    let observedReq: ApprovalRequest | undefined;
+    const requestApproval: ApprovalRequester = async (req) => {
+      observedReq = req;
+      return { decision: 'approve' };
+    };
+    const hitl = new HitlGate({ requestApproval });
     await hitl.checkWrite({ path: '/etc/shadow', cwd: '/tmp', requestId: 'r2' });
     expect(observedReq?.kind).toBe('write');
-    expect(observedReq?.path).toBe('/etc/shadow');
+    if (observedReq && observedReq.kind === 'write') {
+      expect(observedReq.path).toBe('/etc/shadow');
+    }
   });
 
   it('checkRead passes kind:"read" and path field in the ApprovalRequest', async () => {
-    let observedReq: { kind?: string; path?: string } | undefined;
-    const hitl = new HitlGate({
-      requestApproval: async (req) => {
-        observedReq = req as unknown as { kind?: string; path?: string };
-        return { decision: 'approve' };
-      },
-    });
+    let observedReq: ApprovalRequest | undefined;
+    const requestApproval: ApprovalRequester = async (req) => {
+      observedReq = req;
+      return { decision: 'approve' };
+    };
+    const hitl = new HitlGate({ requestApproval });
     await hitl.checkRead({ path: '/home/patty/.ssh/id_rsa', requestId: 'r3' });
     expect(observedReq?.kind).toBe('read');
-    expect(observedReq?.path).toBe('/home/patty/.ssh/id_rsa');
+    if (observedReq && observedReq.kind === 'read') {
+      expect(observedReq.path).toBe('/home/patty/.ssh/id_rsa');
+    }
   });
 
   it('checkMcp with approving requester returns { allowed: true, requiredApproval: true }', async () => {

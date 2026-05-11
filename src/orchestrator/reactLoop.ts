@@ -73,6 +73,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
         case 'error':
         case 'turn_complete':
         case 'tool_result':
+        case 'system_message':
           break;
       }
     }

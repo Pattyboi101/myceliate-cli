@@ -64,6 +64,8 @@ export interface BootToolsResult {
 const BashStubSchema = z.object({ command: z.string().min(1) }).strict();
 
 export function bootTools(opts: BootToolsOpts): BootToolsResult {
+  const emit: (ev: Parameters<NonNullable<BootToolsOpts['emit']>>[0]) => void =
+    opts.emit ?? ((_ev) => {});
   const tools = new ToolRegistry();
 
   tools.register(createReadFileTool({ hitl: opts.hitl }));
@@ -97,7 +99,7 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
   const germinateTool = createGerminateSporeTool({
     registry: opts.registry,
     cwd: opts.cwd ?? process.cwd(),
-    emit: opts.emit ?? ((_ev) => {}),
+    emit,
     appendSystemPrompt: opts.appendSystemPrompt ?? ((_section) => {}),
     // Phase 3 forward-compat deps (consumed in T28).  Conditional spread avoids
     // exactOptionalPropertyTypes violations when opts.mcpLifecycle is absent.
@@ -201,7 +203,7 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
     if (opts.mcpLifecycle) {
       await opts.mcpLifecycle.teardown(sporeName);
     }
-    opts.emit?.({
+    emit({
       type: 'system_message',
       text: `MCP server for "${sporeName}" terminated; ${removedCount} tool wrapper(s) deregistered.`,
     });

@@ -21,6 +21,8 @@ import {
 } from './adapters/streamEvent.js';
 import { V3Adapter } from './adapters/v3/adapter.js';
 import { V4Adapter } from './adapters/v4/adapter.js';
+import { runMcpInstall } from './cli/mcpInstall.js';
+import { parseSubcommand } from './cli/parseSubcommand.js';
 import { ConversationLog } from './memory/conversationLog.js';
 import { MarkdownStore } from './memory/markdownStore.js';
 import type { QueryEngine } from './orchestrator/QueryEngine.js';
@@ -30,12 +32,7 @@ import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
 import { bootTools } from './runtime/bootTools.js';
 import { runReplSession } from './runtime/replSession.js';
-import {
-  buildTurnsFromHistory,
-  isSafeToResume,
-  parseNoSporeFlag,
-  parseResumeFlag,
-} from './runtime/resume.js';
+import { buildTurnsFromHistory, isSafeToResume } from './runtime/resume.js';
 import { checkAndWarnEnvOverride } from './runtime/roleToModel.js';
 import { startWorker } from './runtime/workerLifecycle.js';
 import { type ApprovalRequest, type ApprovalResponse, HitlGate } from './security/hitlGate.js';
@@ -49,11 +46,17 @@ async function main(): Promise<void> {
   // runOnboarding so the env-override warn fires before Ink mounts (U4-safe: stderr only).
   const ctx = await senseContext({ cwd: process.cwd() });
 
-  // Phase 18: parse --resume before heavy initialisation so we can exit early
-  // on an invalid flag without spinning up Redis, Ink, etc.
-  const resumeId = parseResumeFlag(process.argv.slice(2));
-  // Phase 19: --no-spore opts out of sector-pack loading.
-  const noSpore = parseNoSporeFlag(process.argv.slice(2));
+  // Phase 3: unified argv parser — dispatches on subcommand kind.
+  // Parses before heavy initialisation so mcp-install can run without
+  // spinning up Redis, Ink, etc.
+  const sub = parseSubcommand(process.argv.slice(2));
+  if (sub.kind === 'mcp-install') {
+    await runMcpInstall(sub);
+    process.exit(0);
+  }
+  // sub.kind === 'interactive' — extract resumeId and noSpore.
+  const resumeId = sub.resumeId;
+  const noSpore = sub.noSpore;
 
   const sessionId = resumeId ?? randomUUID();
   const logger = createLogger({ logsDir: join(ctx.memoryDir, 'logs') });

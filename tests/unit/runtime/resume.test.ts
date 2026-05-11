@@ -1,11 +1,12 @@
 // tests/unit/runtime/resume.test.ts
+//
+// Note: parseResumeFlag and parseNoSporeFlag were removed from resume.ts in
+// Phase 3 (Exoenzyme) — their logic is now part of parseSubcommand (interactive
+// branch) in src/cli/parseSubcommand.ts.  See tests/unit/cli/parseSubcommand.test.ts
+// for the corresponding regression tests.
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../../../src/adapters/messages.js';
-import {
-  buildTurnsFromHistory,
-  isSafeToResume,
-  parseResumeFlag,
-} from '../../../src/runtime/resume.js';
+import { buildTurnsFromHistory, isSafeToResume } from '../../../src/runtime/resume.js';
 
 describe('isSafeToResume (Phase 18 Task 110)', () => {
   it('returns true for an empty history (fresh resume)', () => {
@@ -147,34 +148,5 @@ describe('buildTurnsFromHistory (Phase 18 review m2)', () => {
   });
 });
 
-// Phase 18 review m3: parseResumeFlag had zero unit tests previously.
-// Locks the throw cases that the implementation guards against.
-describe('parseResumeFlag (Phase 18 review m3)', () => {
-  it('returns undefined when --resume is absent', () => {
-    expect(parseResumeFlag(['--other', 'value'])).toBeUndefined();
-    expect(parseResumeFlag([])).toBeUndefined();
-  });
-
-  it('returns the id when --resume is followed by a non-flag value', () => {
-    expect(parseResumeFlag(['--resume', 'abc-123'])).toBe('abc-123');
-    expect(parseResumeFlag(['--first', 'x', '--resume', 'sess-1'])).toBe('sess-1');
-  });
-
-  it('throws when --resume is at end-of-argv (missing argument)', () => {
-    expect(() => parseResumeFlag(['--resume'])).toThrow(/--resume requires a session-id/);
-  });
-
-  it('throws when --resume is followed by another flag', () => {
-    expect(() => parseResumeFlag(['--resume', '--other-flag'])).toThrow(
-      /--resume requires a session-id/,
-    );
-  });
-
-  it('throws when --resume is followed by an empty string', () => {
-    expect(() => parseResumeFlag(['--resume', ''])).toThrow(/--resume requires a session-id/);
-  });
-
-  it('uses the FIRST occurrence when --resume appears multiple times', () => {
-    expect(parseResumeFlag(['--resume', 'first', '--resume', 'second'])).toBe('first');
-  });
-});
+// parseResumeFlag tests moved to tests/unit/cli/parseSubcommand.test.ts
+// (Phase 3 Exoenzyme — parseResumeFlag subsumed into parseSubcommand).

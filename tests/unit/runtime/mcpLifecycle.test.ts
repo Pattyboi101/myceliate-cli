@@ -184,7 +184,7 @@ describe('McpLifecycle', () => {
       await lifecycle.spawn(spore as never);
 
       // With a short grace window, lifecycle should escalate to SIGKILL and still resolve
-      const lifecycleShortGrace = new McpLifecycle(makeOpts({ sigtermGraceMs: 500 }));
+      const lifecycleShortGrace = new McpLifecycle(makeOpts({ teardownGraceMs: 500 }));
       await lifecycleShortGrace.spawn(spore as never);
 
       await expect(lifecycleShortGrace.teardown('stubborn')).resolves.toBeUndefined();

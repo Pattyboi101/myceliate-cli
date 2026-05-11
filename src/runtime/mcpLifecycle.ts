@@ -23,11 +23,24 @@ import type { Logger } from '../util/logger.js';
 // ─── Public types ──────────────────────────────────────────────────────────────
 
 export interface McpLifecycleOpts {
-  /** Directory for MCP server log files (mcp-<name>.log per server). */
+  /**
+   * Directory for MCP server log files (mcp-<name>.log per server).
+   *
+   * Spec gap note: §5.5 doesn't list logsDir in McpLifecycleOpts, but log
+   * routing to `.myceliate/logs/mcp-<server>.log` is spec'd in §5.1.3 and
+   * §5.5's "wired into" bullet.  Kept REQUIRED so callers are explicit; the
+   * bootTools path (T27) resolves this from ctx.memoryDir at construction time.
+   */
   logsDir: string;
+  /**
+   * Timeout in ms for the MCP initialize handshake (§5.5).
+   * Defaults from MCP_INITIALIZE_TIMEOUT_MS env var, then 5000.
+   */
+  initializeTimeoutMs?: number;
   /**
    * Default callTimeoutMs for all MCP clients spawned by this lifecycle.
    * Per-spore manifest.mcp_server.call_timeout_ms takes precedence (§5.2).
+   * Defaults from MCP_CALL_TIMEOUT_MS env var, then 30000.
    */
   callTimeoutMs?: number;
   /**
@@ -43,11 +56,10 @@ export interface McpLifecycleOpts {
     exitInfo: { code: number | null; signal: NodeJS.Signals | null },
   ) => void;
   /**
-   * Grace period in ms between SIGTERM and SIGKILL escalation.
-   * Defaults to 3000ms (matches workerLifecycle's 2s pattern with a little
-   * extra tolerance for MCP server shutdown sequences).
+   * Grace period in ms between SIGTERM and SIGKILL escalation (§5.5).
+   * Defaults from MCP_TEARDOWN_GRACE_MS env var, then 2000.
    */
-  sigtermGraceMs?: number;
+  teardownGraceMs?: number;
   logger: Logger;
 }
 
@@ -79,11 +91,17 @@ export class McpLifecycleSpawnError extends Error {
 export class McpLifecycle {
   private readonly _opts: McpLifecycleOpts;
   private readonly _active = new Map<string, ActiveEntry>();
-  private readonly _sigtermGraceMs: number;
+  private readonly _initializeTimeoutMs: number;
+  private readonly _teardownGraceMs: number;
+  private readonly _callTimeoutMs: number;
 
   constructor(opts: McpLifecycleOpts) {
     this._opts = opts;
-    this._sigtermGraceMs = opts.sigtermGraceMs ?? 3000;
+    this._initializeTimeoutMs =
+      opts.initializeTimeoutMs ?? (Number(process.env.MCP_INITIALIZE_TIMEOUT_MS) || 5000);
+    this._teardownGraceMs =
+      opts.teardownGraceMs ?? (Number(process.env.MCP_TEARDOWN_GRACE_MS) || 2000);
+    this._callTimeoutMs = opts.callTimeoutMs ?? (Number(process.env.MCP_CALL_TIMEOUT_MS) || 30000);
   }
 
   /**
@@ -113,16 +131,15 @@ export class McpLifecycle {
 
     // Step 3: createMcpClient with per-spore callTimeoutMs override (§5.2).
     // Per-spore call_timeout_ms takes precedence over the lifecycle default.
-    const callTimeoutMs = mcpServer.call_timeout_ms ?? this._opts.callTimeoutMs;
+    const callTimeoutMs = mcpServer.call_timeout_ms ?? this._callTimeoutMs;
     const logPath = join(this._opts.logsDir, `mcp-${spore.name}.log`);
 
     const client = createMcpClient({
       command: mcpServer.command,
       args: mcpServer.args,
       env: mcpServer.env,
-      // exactOptionalPropertyTypes: only spread callTimeoutMs when it's defined
-      // so we don't accidentally pass undefined into an optional-but-typed field.
-      ...(callTimeoutMs !== undefined ? { callTimeoutMs } : {}),
+      callTimeoutMs,
+      initializeTimeoutMs: this._initializeTimeoutMs,
       serverName: spore.name,
       logPath,
       logger: this._opts.logger,
@@ -223,7 +240,7 @@ export class McpLifecycle {
           } catch {
             // Already dead — ignore.
           }
-        }, this._sigtermGraceMs).unref();
+        }, this._teardownGraceMs).unref();
       }, 100); // 100ms head-start for the SDK's own close() before our SIGTERM.
       graceTimer.unref();
 

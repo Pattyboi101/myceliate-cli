@@ -16,7 +16,7 @@ import type { SporeManifest } from '../spores/SporeManifest.js';
 import type { Logger } from '../util/logger.js';
 import type { McpToolDescriptor } from './McpClient.js';
 
-const AUTO_GEN_MARKER =
+export const AUTO_GEN_MARKER =
   '<!-- MYCELIATE: AUTO-GENERATED ABOVE; user notes BELOW are preserved on --regenerate -->';
 
 const MAX_FM_DESC_LEN = 200;

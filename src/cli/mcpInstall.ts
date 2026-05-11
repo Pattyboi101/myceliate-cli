@@ -15,14 +15,10 @@ import { join } from 'node:path';
 import { stringify as yamlStringify } from 'yaml';
 import { createMcpClient } from '../mcp/McpClient.js';
 import type { McpToolDescriptor } from '../mcp/McpClient.js';
-import { translateMcpSchema } from '../mcp/SchemaTranslator.js';
+import { AUTO_GEN_MARKER, translateMcpSchema } from '../mcp/SchemaTranslator.js';
 import type { SporeManifest } from '../spores/SporeManifest.js';
 import { createLogger } from '../util/logger.js';
 import type { Logger } from '../util/logger.js';
-
-// The auto-gen marker (must match SchemaTranslator.ts exactly).
-const AUTO_GEN_MARKER =
-  '<!-- MYCELIATE: AUTO-GENERATED ABOVE; user notes BELOW are preserved on --regenerate -->';
 
 export interface McpInstallOpts {
   name: string;
@@ -131,9 +127,7 @@ export async function runMcpInstall(opts: McpInstallOpts): Promise<void> {
     // Build SKILL.md frontmatter
     const skillFrontmatter = buildSkillFrontmatter(name, description);
 
-    // Merge below-marker user content if regenerating
-    const mergedBelowMarker = belowMarkerContent;
-    const skillMdContent = `${skillFrontmatter}\n${skillBody}${mergedBelowMarker}`;
+    const skillMdContent = `${skillFrontmatter}\n${skillBody}${belowMarkerContent}`;
     await writeFile(join(stagingDir, 'SKILL.md'), skillMdContent, 'utf-8');
 
     // Write commands/*.md

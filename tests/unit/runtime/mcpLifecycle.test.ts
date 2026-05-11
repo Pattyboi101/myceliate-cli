@@ -181,7 +181,6 @@ describe('McpLifecycle', () => {
 
     it('escalates to SIGKILL when FAKE_TRAP_SIGTERM=1', async () => {
       const spore = makeSpore('stubborn', { FAKE_TRAP_SIGTERM: '1' });
-      await lifecycle.spawn(spore as never);
 
       // With a short grace window, lifecycle should escalate to SIGKILL and still resolve
       const lifecycleShortGrace = new McpLifecycle(makeOpts({ teardownGraceMs: 500 }));

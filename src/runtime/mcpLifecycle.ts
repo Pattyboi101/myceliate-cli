@@ -195,7 +195,7 @@ export class McpLifecycle {
    * 1. client.close() — closes stdio transport; sets _closing flag so unexpected-exit
    *    handler does NOT fire (workerLifecycle pattern).
    * 2. SIGTERM the child (if PID is accessible).
-   * 3. setTimeout(sigtermGraceMs) → SIGKILL if child has not exited.
+   * 3. setTimeout(teardownGraceMs) → SIGKILL if child has not exited.
    * 4. Deregister from map.
    *
    * No-op if the spore is not currently active.
@@ -227,6 +227,7 @@ export class McpLifecycle {
         void client.close().then(resolve, resolve);
       });
 
+      let sigkillTimer: NodeJS.Timeout | undefined;
       const graceTimer = setTimeout(() => {
         try {
           process.kill(childPid, 'SIGTERM');
@@ -234,18 +235,20 @@ export class McpLifecycle {
           // PID may already be gone — ignore ESRCH.
         }
         // Additional SIGKILL after the grace window.
-        setTimeout(() => {
+        sigkillTimer = setTimeout(() => {
           try {
             process.kill(childPid, 'SIGKILL');
           } catch {
             // Already dead — ignore.
           }
-        }, this._teardownGraceMs).unref();
+        }, this._teardownGraceMs);
+        sigkillTimer.unref();
       }, 100); // 100ms head-start for the SDK's own close() before our SIGTERM.
       graceTimer.unref();
 
       await exitPromise;
       clearTimeout(graceTimer);
+      clearTimeout(sigkillTimer);
     } else {
       // No PID accessible (child exited before initialize returned a PID — very rare).
       // Fall back to SDK's close() which handles its own SIGTERM/SIGKILL.

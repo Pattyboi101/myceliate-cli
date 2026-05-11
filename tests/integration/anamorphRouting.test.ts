@@ -86,7 +86,7 @@ describe('anamorph routing — plumbing reaches the wire', () => {
       name: 'noop',
       description: 'no-op tool for testing',
       capability: 'execution',
-      inputSchema: z.object({}),
+      inputSchema: { kind: 'zod', zod: z.object({}) },
       run: async () => 'noop done',
     });
     for await (const _ev of runReactLoop({ client, engine, tools, maxIterations: 2 })) {
@@ -128,7 +128,7 @@ describe('anamorph routing — plumbing reaches the wire', () => {
       name: 'noop',
       description: 'no-op tool for testing',
       capability: 'execution',
-      inputSchema: z.object({}),
+      inputSchema: { kind: 'zod', zod: z.object({}) },
       run: async () => 'noop done',
     });
     for await (const _ev of runReactLoop({ client, engine, tools, maxIterations: 2 })) {

@@ -1,6 +1,10 @@
 // tests/unit/security/hitlGate.test.ts
 import { describe, expect, it, vi } from 'vitest';
-import { HitlGate } from '../../../src/security/hitlGate.js';
+import {
+  type ApprovalRequest,
+  type ApprovalRequester,
+  HitlGate,
+} from '../../../src/security/hitlGate.js';
 
 describe('HitlGate', () => {
   // --- Plan-specified tests ---
@@ -75,12 +79,13 @@ describe('HitlGate', () => {
     expect(verdict.requiredApproval).toBe(true);
   });
 
-  it('requestApproval is called with command, cwd, requestId, and reason fields', async () => {
+  it('requestApproval is called with kind:bash, command, cwd, requestId, and reason fields', async () => {
     const requestApproval = vi.fn().mockResolvedValue({ decision: 'approve' });
     const gate = new HitlGate({ requestApproval });
     const cwd = process.cwd();
     await gate.checkBash({ command: 'sudo apt-get install vim', cwd, requestId: 'test-id' });
     expect(requestApproval).toHaveBeenCalledWith({
+      kind: 'bash',
       command: 'sudo apt-get install vim',
       cwd,
       requestId: 'test-id',
@@ -159,5 +164,120 @@ describe('HitlGate', () => {
     });
     expect(observedRequestId).toBe('tool-call-abc-123');
     expect(verdict.allowed).toBe(false);
+  });
+
+  // --- Discriminated union kind tests (T25) ---
+
+  it('checkBash passes kind:"bash" in the ApprovalRequest', async () => {
+    let observedKind: string | undefined;
+    const hitl = new HitlGate({
+      requestApproval: async (req) => {
+        observedKind = req.kind;
+        return { decision: 'approve' };
+      },
+    });
+    await hitl.checkBash({ command: 'rm -rf /', cwd: '/tmp', requestId: 'r1' });
+    expect(observedKind).toBe('bash');
+  });
+
+  it('checkWrite passes kind:"write" and path field (not command) in the ApprovalRequest', async () => {
+    let observedReq: ApprovalRequest | undefined;
+    const requestApproval: ApprovalRequester = async (req) => {
+      observedReq = req;
+      return { decision: 'approve' };
+    };
+    const hitl = new HitlGate({ requestApproval });
+    await hitl.checkWrite({ path: '/etc/shadow', cwd: '/tmp', requestId: 'r2' });
+    expect(observedReq?.kind).toBe('write');
+    if (observedReq && observedReq.kind === 'write') {
+      expect(observedReq.path).toBe('/etc/shadow');
+    }
+  });
+
+  it('checkRead passes kind:"read" and path field in the ApprovalRequest', async () => {
+    let observedReq: ApprovalRequest | undefined;
+    const requestApproval: ApprovalRequester = async (req) => {
+      observedReq = req;
+      return { decision: 'approve' };
+    };
+    const hitl = new HitlGate({ requestApproval });
+    await hitl.checkRead({ path: '/home/patty/.ssh/id_rsa', requestId: 'r3' });
+    expect(observedReq?.kind).toBe('read');
+    if (observedReq && observedReq.kind === 'read') {
+      expect(observedReq.path).toBe('/home/patty/.ssh/id_rsa');
+    }
+  });
+
+  it('checkMcp with approving requester returns { allowed: true, requiredApproval: true }', async () => {
+    const requestApproval = vi.fn().mockResolvedValue({ decision: 'approve' });
+    const gate = new HitlGate({ requestApproval });
+    const verdict = await gate.checkMcp({
+      requestId: 'mcp-r1',
+      server: 'playwright',
+      tool: 'navigate',
+      argsSummary: '{ url: "https://example.com" }',
+      reason: 'MCP tool call',
+    });
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.requiredApproval).toBe(true);
+    expect(requestApproval).toHaveBeenCalled();
+  });
+
+  it('checkMcp with rejecting requester returns { allowed: false, requiredApproval: true, feedback }', async () => {
+    const requestApproval = vi
+      .fn()
+      .mockResolvedValue({ decision: 'reject', feedback: 'not allowed' });
+    const gate = new HitlGate({ requestApproval });
+    const verdict = await gate.checkMcp({
+      requestId: 'mcp-r2',
+      server: 'playwright',
+      tool: 'click',
+      argsSummary: '{ selector: "#btn" }',
+      reason: 'MCP tool call',
+    });
+    expect(verdict.allowed).toBe(false);
+    if (!verdict.allowed) {
+      expect(verdict.requiredApproval).toBe(true);
+      expect(verdict.feedback).toBe('not allowed');
+    }
+  });
+
+  it('checkMcp always prompts — no static gate (always calls requestApproval)', async () => {
+    const requestApproval = vi.fn().mockResolvedValue({ decision: 'approve' });
+    const gate = new HitlGate({ requestApproval });
+    await gate.checkMcp({
+      requestId: 'mcp-r3',
+      server: 'some-server',
+      tool: 'safe_tool',
+      argsSummary: '{}',
+      reason: 'MCP tool call',
+    });
+    // Unlike checkBash which has a static gate, checkMcp always prompts.
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it('checkMcp passes kind:"mcp" with server, tool, argsSummary fields', async () => {
+    let observedReq: unknown;
+    const hitl = new HitlGate({
+      requestApproval: async (req) => {
+        observedReq = req;
+        return { decision: 'approve' };
+      },
+    });
+    await hitl.checkMcp({
+      requestId: 'mcp-r4',
+      server: 'playwright',
+      tool: 'navigate',
+      argsSummary: '{ url: "https://example.com" }',
+      reason: 'sensitive MCP call',
+    });
+    expect(observedReq).toMatchObject({
+      kind: 'mcp',
+      requestId: 'mcp-r4',
+      server: 'playwright',
+      tool: 'navigate',
+      argsSummary: '{ url: "https://example.com" }',
+      reason: 'sensitive MCP call',
+    });
   });
 });

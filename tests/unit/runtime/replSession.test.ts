@@ -397,3 +397,201 @@ describe('replSession slash dispatcher routing', () => {
     }
   });
 });
+
+// ─── T29: teardownMcpSpore wiring in /spore unpin ────────────────────────────
+
+describe('replSession /spore unpin teardownMcpSpore wiring', () => {
+  /**
+   * Build a minimal fixture registry with one regular spore (no mcp_server)
+   * and one MCP spore (with mcp_server).
+   */
+  async function buildPinFixtureRegistry(): Promise<{
+    registry: SporeRegistry;
+    cwd: string;
+    cleanup: () => Promise<void>;
+  }> {
+    const root = await mkdtemp(join(tmpdir(), 'myc-repl-unpin-'));
+    const cwd = join(root, 'project');
+    await mkdir(cwd, { recursive: true });
+
+    // Plain spore — no mcp_server
+    const plainDir = join(root, 'plain-spore');
+    await mkdir(plainDir, { recursive: true });
+    await writeFile(
+      join(plainDir, 'myceliate.yaml'),
+      'name: plain-spore\ndescription: Plain.\nversion: 1.0.0\naccent_color: "#aabbcc"\nagents: []',
+      'utf8',
+    );
+    await writeFile(
+      join(plainDir, 'SKILL.md'),
+      '---\nname: plain-spore\ndescription: Plain spore.\n---\nbody',
+      'utf8',
+    );
+
+    // MCP spore — has mcp_server
+    const mcpDir = join(root, 'mcp-spore');
+    await mkdir(mcpDir, { recursive: true });
+    await writeFile(
+      join(mcpDir, 'myceliate.yaml'),
+      'name: mcp-spore\ndescription: MCP.\nversion: 1.0.0\naccent_color: "#112233"\nagents: []\nmcp_server:\n  command: node\n  args: [server.js]\n',
+      'utf8',
+    );
+    await writeFile(
+      join(mcpDir, 'SKILL.md'),
+      '---\nname: mcp-spore\ndescription: MCP spore.\n---\nbody',
+      'utf8',
+    );
+
+    const registry = await SporeRegistry.discover(
+      { bundledDir: root, userDir: '/nonexistent', projectDir: '/nonexistent' },
+      { logger: noopLogger },
+    );
+
+    return {
+      registry,
+      cwd,
+      cleanup: () => rm(root, { recursive: true, force: true }),
+    };
+  }
+
+  it('/spore unpin invokes teardownMcpSpore with the previously-pinned spore name', async () => {
+    const { registry, cwd, cleanup } = await buildPinFixtureRegistry();
+    try {
+      // First pin plain-spore so unpin has something to act on.
+      const { writePin, clearPin: _clearPin } = await import('../../../src/spores/pinFile.js');
+      await writePin(cwd, 'plain-spore', noopLogger);
+
+      const teardownCalls: string[] = [];
+      const teardownMcpSpore = vi.fn(async (name: string) => {
+        teardownCalls.push(name);
+      });
+
+      const client = mockClient([]);
+      const prompts = ['/spore unpin', '/quit'];
+      let pi = 0;
+
+      await runReplSession({
+        client: client as unknown as DeepSeekClient,
+        // biome-ignore lint/suspicious/noExplicitAny: mock collaborator
+        tools: { definitions: () => [], invoke: vi.fn() } as any,
+        model: 'mock',
+        cwd,
+        sporeRegistry: registry,
+        logger: noopLogger,
+        getActiveSpore: () => 'plain-spore',
+        teardownMcpSpore,
+        onState: () => {},
+        onSlashOutput: () => {},
+        onTurnComplete: () => {},
+        readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      });
+
+      expect(teardownMcpSpore).toHaveBeenCalledOnce();
+      expect(teardownCalls).toEqual(['plain-spore']);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('/spore unpin does NOT invoke teardownMcpSpore when no spore is active', async () => {
+    const { registry, cwd, cleanup } = await buildPinFixtureRegistry();
+    try {
+      const teardownMcpSpore = vi.fn(async (_name: string) => {});
+
+      const client = mockClient([]);
+      const prompts = ['/spore unpin', '/quit'];
+      let pi = 0;
+
+      await runReplSession({
+        client: client as unknown as DeepSeekClient,
+        // biome-ignore lint/suspicious/noExplicitAny: mock collaborator
+        tools: { definitions: () => [], invoke: vi.fn() } as any,
+        model: 'mock',
+        cwd,
+        sporeRegistry: registry,
+        logger: noopLogger,
+        getActiveSpore: () => null,
+        teardownMcpSpore,
+        onState: () => {},
+        onSlashOutput: () => {},
+        onTurnComplete: () => {},
+        readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      });
+
+      expect(teardownMcpSpore).not.toHaveBeenCalled();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('/spore pin to another spore does NOT invoke teardownMcpSpore (multi-active model)', async () => {
+    const { registry, cwd, cleanup } = await buildPinFixtureRegistry();
+    try {
+      const teardownMcpSpore = vi.fn(async (_name: string) => {});
+
+      const client = mockClient([]);
+      const prompts = ['/spore pin plain-spore', '/quit'];
+      let pi = 0;
+
+      await runReplSession({
+        client: client as unknown as DeepSeekClient,
+        // biome-ignore lint/suspicious/noExplicitAny: mock collaborator
+        tools: { definitions: () => [], invoke: vi.fn() } as any,
+        model: 'mock',
+        cwd,
+        sporeRegistry: registry,
+        logger: noopLogger,
+        getActiveSpore: () => 'mcp-spore',
+        teardownMcpSpore,
+        onState: () => {},
+        onSlashOutput: () => {},
+        onTurnComplete: () => {},
+        readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      });
+
+      expect(teardownMcpSpore).not.toHaveBeenCalled();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('/spore unpin still clears the pin file (regression — existing behavior unchanged)', async () => {
+    const { registry, cwd, cleanup } = await buildPinFixtureRegistry();
+    try {
+      const { writePin } = await import('../../../src/spores/pinFile.js');
+      const { readPin } = await import('../../../src/spores/pinFile.js');
+      await writePin(cwd, 'plain-spore', noopLogger);
+
+      const teardownMcpSpore = vi.fn(async (_name: string) => {});
+      const slashOutputs: string[] = [];
+
+      const client = mockClient([]);
+      const prompts = ['/spore unpin', '/quit'];
+      let pi = 0;
+
+      await runReplSession({
+        client: client as unknown as DeepSeekClient,
+        // biome-ignore lint/suspicious/noExplicitAny: mock collaborator
+        tools: { definitions: () => [], invoke: vi.fn() } as any,
+        model: 'mock',
+        cwd,
+        sporeRegistry: registry,
+        logger: noopLogger,
+        getActiveSpore: () => 'plain-spore',
+        teardownMcpSpore,
+        onState: () => {},
+        onSlashOutput: (t) => slashOutputs.push(t),
+        onTurnComplete: () => {},
+        readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      });
+
+      // Pin file was cleared
+      const pinAfter = await readPin(cwd, noopLogger);
+      expect(pinAfter).toBeNull();
+      // Unpin message was emitted
+      expect(slashOutputs.some((s) => s.toLowerCase().includes('unpin'))).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
+});

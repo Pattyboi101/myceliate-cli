@@ -15,12 +15,15 @@ import {
   isError,
   isGermination,
   isReasoningDelta,
+  isSystemMessage,
   isToolCall,
   isToolResult,
   isTurnComplete,
 } from './adapters/streamEvent.js';
 import { V3Adapter } from './adapters/v3/adapter.js';
 import { V4Adapter } from './adapters/v4/adapter.js';
+import { runMcpInstall } from './cli/mcpInstall.js';
+import { parseSubcommand } from './cli/parseSubcommand.js';
 import { ConversationLog } from './memory/conversationLog.js';
 import { MarkdownStore } from './memory/markdownStore.js';
 import type { QueryEngine } from './orchestrator/QueryEngine.js';
@@ -29,13 +32,9 @@ import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
 import { bootTools } from './runtime/bootTools.js';
+import { McpLifecycle } from './runtime/mcpLifecycle.js';
 import { runReplSession } from './runtime/replSession.js';
-import {
-  buildTurnsFromHistory,
-  isSafeToResume,
-  parseNoSporeFlag,
-  parseResumeFlag,
-} from './runtime/resume.js';
+import { buildTurnsFromHistory, isSafeToResume } from './runtime/resume.js';
 import { checkAndWarnEnvOverride } from './runtime/roleToModel.js';
 import { startWorker } from './runtime/workerLifecycle.js';
 import { type ApprovalRequest, type ApprovalResponse, HitlGate } from './security/hitlGate.js';
@@ -49,11 +48,17 @@ async function main(): Promise<void> {
   // runOnboarding so the env-override warn fires before Ink mounts (U4-safe: stderr only).
   const ctx = await senseContext({ cwd: process.cwd() });
 
-  // Phase 18: parse --resume before heavy initialisation so we can exit early
-  // on an invalid flag without spinning up Redis, Ink, etc.
-  const resumeId = parseResumeFlag(process.argv.slice(2));
-  // Phase 19: --no-spore opts out of sector-pack loading.
-  const noSpore = parseNoSporeFlag(process.argv.slice(2));
+  // Phase 3: unified argv parser — dispatches on subcommand kind.
+  // Parses before heavy initialisation so mcp-install can run without
+  // spinning up Redis, Ink, etc.
+  const sub = parseSubcommand(process.argv.slice(2));
+  if (sub.kind === 'mcp-install') {
+    await runMcpInstall(sub);
+    process.exit(0);
+  }
+  // sub.kind === 'interactive' — extract resumeId and noSpore.
+  const resumeId = sub.resumeId;
+  const noSpore = sub.noSpore;
 
   const sessionId = resumeId ?? randomUUID();
   const logger = createLogger({ logsDir: join(ctx.memoryDir, 'logs') });
@@ -204,10 +209,16 @@ async function main(): Promise<void> {
     logsDir: join(ctx.memoryDir, 'logs'), // matches createLogger usage at index.ts:63
   });
 
+  // Phase 3: construct McpLifecycle for MCP server process management.
+  const mcpLifecycle = new McpLifecycle({
+    logger,
+    logsDir: join(ctx.memoryDir, 'logs'),
+  });
+
   // Phase 23: bootTools extracts the tool registration block from index.ts and
   // adds setActiveSpore for allowlist management (Phase 23 Task 3).
   let bootWarnings: string[] = [];
-  const { tools, setActiveSpore } = bootTools({
+  const { tools, setActiveSpore, teardownMcpSpore } = bootTools({
     hitl,
     queue,
     queueEvents,
@@ -221,6 +232,11 @@ async function main(): Promise<void> {
         // Phase 21: set germinationCard so <GerminationCard> renders in-stream.
         rerender({ ...state, activeSpore: uiActiveSpore, germinationCard: uiActiveSpore });
         logger.info({ event: 'germination', spore: ev.spore });
+      } else if (isSystemMessage(ev)) {
+        // Phase 3: route MCP teardown / crash notifications into chat so the user
+        // sees a line when their MCP server dies or is explicitly unpinned.
+        const newTurn: CompletedTurn = { userInput: '', content: ev.text };
+        rerender({ ...state, turns: [...state.turns, newTurn] });
       }
     },
     appendSystemPrompt: (section) => {
@@ -240,6 +256,7 @@ async function main(): Promise<void> {
       bootWarnings = [...bootWarnings, msg];
       rerender({ ...state, bootWarnings });
     },
+    mcpLifecycle,
   });
 
   // Apply initial allowlist if a spore was already active at boot
@@ -282,6 +299,7 @@ async function main(): Promise<void> {
       sporeRegistry: spores.registry,
       logger,
       getActiveSpore: () => activeSpore,
+      teardownMcpSpore,
       onSlashOutput: (text) => {
         // Phase 21: render slash command output as a completed turn (no streaming).
         const newTurn: CompletedTurn = { userInput: '', content: text };
@@ -451,6 +469,7 @@ async function main(): Promise<void> {
     ink.unmount();
     await queueEvents.close();
     await queue.close();
+    await mcpLifecycle.teardownAll(); // Phase 3 (T29): allSettled semantics — individual MCP teardown failures do not abort worker.shutdown()
     await worker.shutdown();
   }
 }

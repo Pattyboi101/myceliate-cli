@@ -1,0 +1,37 @@
+[
+  {
+    "name": "search",
+    "description": "Search for documents matching a query.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "Search query string" },
+        "limit": { "type": "number", "description": "Maximum number of results" }
+      },
+      "required": ["query"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "delete-document",
+    "description": "Permanently delete a document by ID.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Document identifier" }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ping",
+    "description": "Check server availability.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  }
+]

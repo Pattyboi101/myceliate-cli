@@ -2,32 +2,9 @@
 import type { Message } from '../adapters/messages.js';
 import type { CompletedTurn } from '../ui/App.js';
 
-/**
- * Parse --resume <id> from argv. Returns the session-id string if present,
- * or undefined if the flag is absent. Throws if --resume appears without an
- * argument or with another flag as its value.
- *
- * Behaviour on edge cases (locked by Phase 18 review m3 unit tests):
- * - flag absent → returns undefined
- * - --resume at end-of-argv → throws (id is undefined)
- * - --resume followed by another --flag → throws (id starts with `--`)
- * - --resume "" (empty string) → throws (id is falsy)
- * - multiple --resume flags → first wins (`indexOf` returns first occurrence)
- *
- * Phase 18 review m3: lives in `src/runtime/resume.ts` (was `src/index.ts`).
- * Moved here so unit tests can import without triggering `main()` execution
- * (which initializes TTY for Clack onboarding — fails under vitest's
- * non-TTY worker environment).
- */
-export function parseResumeFlag(argv: readonly string[]): string | undefined {
-  const idx = argv.indexOf('--resume');
-  if (idx === -1) return undefined;
-  const id = argv[idx + 1];
-  if (!id || id.startsWith('--')) {
-    throw new Error('--resume requires a session-id argument (e.g., --resume abc-123)');
-  }
-  return id;
-}
+// parseResumeFlag removed in Phase 3 (Exoenzyme) — logic moved to
+// src/cli/parseSubcommand.ts (interactive branch).  Import parseSubcommand
+// from there instead.
 
 /**
  * Refuse to resume a session whose final assistant turn has tool_calls
@@ -105,11 +82,6 @@ export function buildTurnsFromHistory(history: readonly Message[]): CompletedTur
   return turns;
 }
 
-/**
- * Parse --no-spore from argv. Returns true if the flag is present, false otherwise.
- * When true, the orchestrator boots without loading any spores — useful for testing
- * or when the user explicitly wants a clean session without sector packs.
- */
-export function parseNoSporeFlag(argv: readonly string[]): boolean {
-  return argv.includes('--no-spore');
-}
+// parseNoSporeFlag removed in Phase 3 (Exoenzyme) — logic moved to
+// src/cli/parseSubcommand.ts (interactive branch).  Import parseSubcommand
+// from there instead.

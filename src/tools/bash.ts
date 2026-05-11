@@ -55,7 +55,7 @@ export function createBashTool(deps: BashToolDeps): Tool<BashInput> {
     description:
       'Execute a shell command in the agent cwd. Returns exit code, stdout, stderr, and truncation/timeout flags. Dangerous patterns require HITL approval.',
     capability: 'execution',
-    inputSchema: BashInput as BashSchema,
+    inputSchema: { kind: 'zod', zod: BashInput as BashSchema },
     run: async (input, ctx) => {
       // cwd: use input override if provided (non-empty/non-undefined), otherwise fall back
       // to ctx.cwd. The `||` handles both the Zod-default '' case and the undefined case

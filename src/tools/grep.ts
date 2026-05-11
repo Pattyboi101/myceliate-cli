@@ -9,7 +9,7 @@ export const grepTool: Tool<{ pattern: string; path: string }> = {
   description:
     'Search files recursively under path for lines matching a regex. Returns path:lineNo:text per match.',
   capability: 'execution',
-  inputSchema: z.object({ pattern: z.string(), path: z.string() }),
+  inputSchema: { kind: 'zod', zod: z.object({ pattern: z.string(), path: z.string() }) },
   run: async ({ pattern, path }) => {
     const re = new RegExp(pattern);
     const matches: string[] = [];

@@ -59,7 +59,16 @@ export type StreamEvent =
       durationMs: number;
       preview?: string;
       cause?: unknown;
-    };
+    }
+  /**
+   * Phase 3 (Exoenzyme): synthetic lifecycle notification emitted by
+   * `teardownMcpSpore` when an MCP server is torn down (either unexpectedly or
+   * by explicit /spore unpin). Distinct from `error` (which implies failure)
+   * and `germination` (which implies start). Rendered by the UI as a banner or
+   * status line. `text` is a human-readable summary including removed wrapper
+   * count.
+   */
+  | { type: 'system_message'; text: string };
 
 export const isGermination = (e: StreamEvent): e is GerminationEvent =>
   'type' in e && e.type === 'germination';
@@ -83,3 +92,7 @@ export const isTurnComplete = (
   e: StreamEvent,
 ): e is Extract<StreamEvent, { type: 'turn_complete' }> =>
   'type' in e && e.type === 'turn_complete';
+export const isSystemMessage = (
+  e: StreamEvent,
+): e is Extract<StreamEvent, { type: 'system_message' }> =>
+  'type' in e && e.type === 'system_message';

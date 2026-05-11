@@ -14,6 +14,7 @@ import { ToolRegistry } from '../tools/registry.js';
 import { createSpawnSubagentTool } from '../tools/spawn_subagent.js';
 import { createWriteFileTool } from '../tools/writeFile.js';
 import type { Logger } from '../util/logger.js';
+import type { McpLifecycle } from './mcpLifecycle.js';
 import type { WorkerHandle } from './workerLifecycle.js';
 
 export interface BootToolsOpts {
@@ -37,17 +38,34 @@ export interface BootToolsOpts {
    * state when they expected a sandboxed orchestrator. Fires for stale-pin
    * fallback, unknown allowlist entries, and coordination-tool stripping. */
   onUserVisibleWarning?: (msg: string) => void;
+  /**
+   * Phase 3 (T27): MCP server lifecycle owner. Constructed by main() and
+   * threaded here so germinate_spore (T28) can spawn/own MCP server children.
+   * Optional so tests and callers that pre-date Phase 3 don't need to supply it.
+   * When absent, teardownMcpSpore is a no-op for the lifecycle.teardown call.
+   */
+  mcpLifecycle?: McpLifecycle;
 }
 
 export interface BootToolsResult {
   tools: ToolRegistry;
   setActiveSpore: (name: string | null) => void;
+  /**
+   * Phase 3 (T27): closure that tears down a single MCP-spore (server + tool
+   * wrappers). Wired into mcpLifecycle.opts.onUnexpectedExit (via
+   * setOnUnexpectedExit) AND returned here for index.ts's onActiveSporeChange
+   * and replSession.ts's /spore unpin handler to call on explicit teardown.
+   * Both unexpected and explicit teardowns share one code path.
+   */
+  teardownMcpSpore: (sporeName: string) => Promise<void>;
 }
 
 // Minimal stub schema for bash in test contexts without a real queue.
 const BashStubSchema = z.object({ command: z.string().min(1) }).strict();
 
 export function bootTools(opts: BootToolsOpts): BootToolsResult {
+  const emit: (ev: Parameters<NonNullable<BootToolsOpts['emit']>>[0]) => void =
+    opts.emit ?? ((_ev) => {});
   const tools = new ToolRegistry();
 
   tools.register(createReadFileTool({ hitl: opts.hitl }));
@@ -73,7 +91,7 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
       name: 'bash',
       description: 'Execute shell commands (stub — no queue in this context)',
       capability: 'execution',
-      inputSchema: BashStubSchema,
+      inputSchema: { kind: 'zod', zod: BashStubSchema },
       run: async () => 'bash stub: not available in test context',
     });
   }
@@ -81,15 +99,20 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
   const germinateTool = createGerminateSporeTool({
     registry: opts.registry,
     cwd: opts.cwd ?? process.cwd(),
-    emit: opts.emit ?? ((_ev) => {}),
+    emit,
     appendSystemPrompt: opts.appendSystemPrompt ?? ((_section) => {}),
+    // Phase 3 forward-compat deps (consumed in T28).  Conditional spread avoids
+    // exactOptionalPropertyTypes violations when opts.mcpLifecycle is absent.
+    ...(opts.mcpLifecycle !== undefined ? { mcpLifecycle: opts.mcpLifecycle } : {}),
+    toolRegistry: tools,
+    hitlGate: opts.hitl,
   });
   // Wrap germinate_spore to fit ToolRegistry's Tool<Input> interface.
   tools.register({
     name: 'germinate_spore',
     description: germinateTool.description,
     capability: 'coordination' as const,
-    inputSchema: germinateTool.inputSchema,
+    inputSchema: { kind: 'zod', zod: germinateTool.inputSchema },
     run: async (input, _ctx) => {
       const result = await germinateTool.handler(input);
       if (result.ok && opts.setActiveSporeFromGerminate) {
@@ -109,7 +132,7 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
     name: 'spawn_subagent',
     description: spawnTool.description,
     capability: 'coordination' as const,
-    inputSchema: spawnTool.inputSchema,
+    inputSchema: { kind: 'zod', zod: spawnTool.inputSchema },
     run: async (input, _ctx) => {
       const result = await spawnTool.handler(input);
       return JSON.stringify(result);
@@ -166,5 +189,32 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
     tools.setActiveAllowlist(filtered);
   }
 
-  return { tools, setActiveSpore };
+  // Phase 3 (T27): deregistration + teardown closure.  Shared by:
+  //   1. mcpLifecycle.onUnexpectedExit (crash path).
+  //   2. BootToolsResult.teardownMcpSpore (explicit /spore unpin + onActiveSporeChange paths).
+  //
+  // Implementation note: opts.mcpLifecycle is optional (pre-Phase-3 callers omit
+  // it).  When absent, teardownMcpSpore still deregisters wrappers and emits an
+  // event — it just skips the lifecycle.teardown call.  This keeps the closure
+  // safe to invoke unconditionally in index.ts/replSession.ts even when MCP is
+  // not configured.
+  async function teardownMcpSpore(sporeName: string): Promise<void> {
+    const removedCount = tools.deregisterByPrefix(`${sporeName}_`);
+    if (opts.mcpLifecycle) {
+      await opts.mcpLifecycle.teardown(sporeName);
+    }
+    emit({
+      type: 'system_message',
+      text: `MCP server for "${sporeName}" terminated; ${removedCount} tool wrapper(s) deregistered.`,
+    });
+  }
+
+  // Wire the closure as the unexpected-exit handler so crash teardown uses the
+  // same path as explicit teardown.  setOnUnexpectedExit is a one-line setter
+  // added to McpLifecycle in T27 — see mcpLifecycle.ts for rationale.
+  opts.mcpLifecycle?.setOnUnexpectedExit((sporeName) => {
+    void teardownMcpSpore(sporeName);
+  });
+
+  return { tools, setActiveSpore, teardownMcpSpore };
 }

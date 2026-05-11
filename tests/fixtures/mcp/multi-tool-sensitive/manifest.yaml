@@ -1,0 +1,11 @@
+name: docstore
+description: A spore for searching and managing documents via an MCP server.
+version: 0.2.0
+accent_color: '#1a2b3c'
+mcp_server:
+  command: node
+  args:
+    - server.js
+  env: {}
+  sensitive_tools:
+    - delete-document

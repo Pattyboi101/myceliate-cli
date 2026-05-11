@@ -256,7 +256,7 @@ describe('workerLifecycle — crash detection', () => {
 
     expect(reject1).toHaveBeenCalledWith(expect.any(WorkerCrashedError));
     expect(reject2).toHaveBeenCalledWith(expect.any(WorkerCrashedError));
-    expect(reject1.mock.calls[0]![0].exitCode).toBe(1);
+    expect(reject1.mock.calls[0]?.[0].exitCode).toBe(1);
   });
 
   it('does NOT reject tracked jobs on clean shutdown exit', async () => {

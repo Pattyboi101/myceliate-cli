@@ -28,19 +28,32 @@ const SENSITIVE_READ_PATTERNS: { re: RegExp; reason: string }[] = [
   { re: /^\/proc\/self\/environ$/, reason: 'process environment (often leaks credentials)' },
 ];
 
-/** The payload sent to the approval UI when a dangerous command is intercepted. */
-export type ApprovalRequest = {
-  /** Cross-module ID used by the UI bridge to look up the right resolver in
-   * a Map<requestId, fn>. Phase 17 m5 fix: src/index.ts maintains a Map
-   * keyed by this ID so concurrent HITL requests no longer orphan the first
-   * promise. The ID is the originating tool_call.id, threaded from
-   * runReactLoop through ToolRunContext.toolUseId into bash.ts's checkBash
-   * call. */
-  requestId: string;
-  command: string;
-  cwd: string;
-  reason: string;
-};
+/**
+ * The payload sent to the approval UI when a dangerous command is intercepted.
+ *
+ * T25 (v1.5 Phase 3 Exoenzyme): discriminated union — each check method
+ * constructs the appropriate kind-tagged variant. The `kind` field lets
+ * ApprovalPrompt.tsx type-narrow to the correct rendering branch without
+ * unsafe field accesses.
+ *
+ * `requestId` — Cross-module ID used by the UI bridge to look up the right
+ * resolver in a Map<requestId, fn>. Phase 17 m5 fix: src/index.ts maintains
+ * a Map keyed by this ID so concurrent HITL requests no longer orphan the
+ * first promise. The ID is the originating tool_call.id, threaded from
+ * runReactLoop through ToolRunContext.toolUseId into bash.ts's checkBash call.
+ */
+export type ApprovalRequest =
+  | { kind: 'bash'; requestId: string; command: string; cwd: string; reason: string }
+  | { kind: 'write'; requestId: string; path: string; cwd: string; reason: string }
+  | { kind: 'read'; requestId: string; path: string; reason: string }
+  | {
+      kind: 'mcp';
+      requestId: string;
+      server: string;
+      tool: string;
+      argsSummary: string;
+      reason: string;
+    };
 
 /**
  * The response from the approval UI.
@@ -59,6 +72,15 @@ export type WriteCheck = { path: string; cwd: string; requestId: string };
 
 /** Input shape for `HitlGate.checkRead` (v1.5 Cortina). */
 export type ReadCheck = { path: string; requestId: string };
+
+/** Input shape for `HitlGate.checkMcp` (Phase 3). */
+export type McpCheck = {
+  requestId: string;
+  server: string;
+  tool: string;
+  argsSummary: string;
+  reason: string;
+};
 
 /**
  * Discriminated union result from any `HitlGate` check method (checkBash,
@@ -96,6 +118,7 @@ export class HitlGate {
 
     // Await the user's decision — this is the suspension point.
     const response = await this.opts.requestApproval({
+      kind: 'bash',
       requestId: input.requestId,
       command: input.command,
       cwd: input.cwd,
@@ -119,12 +142,9 @@ export class HitlGate {
    * Otherwise the user is prompted to approve / reject — preventing prompt-
    * injected writes to ~/.ssh/authorized_keys, ~/.bashrc, /etc/..., etc.
    *
-   * R11 explicitly mandates HITL on "any write outside cwd". The approval
-   * payload reuses the bash-shaped ApprovalRequest with the `command` field
-   * carrying a "write_file → <path>" description; the UI ApprovalPrompt
-   * already renders this as a labelled approval. v2 may introduce a
-   * discriminated ApprovalRequest union with dedicated `kind: 'write'`
-   * rendering, but that is UI work outside Cortina's scope.
+   * R11 explicitly mandates HITL on "any write outside cwd". T25: the payload
+   * now uses the `kind: 'write'` variant with a `path` field; the old
+   * `command` sentinel is gone.
    */
   async checkWrite(input: WriteCheck): Promise<Verdict> {
     const resolvedPath = isAbsolute(input.path)
@@ -135,8 +155,9 @@ export class HitlGate {
     if (insideCwd) return { allowed: true, requiredApproval: false };
 
     const response = await this.opts.requestApproval({
+      kind: 'write',
       requestId: input.requestId,
-      command: `write_file → ${resolvedPath}`,
+      path: resolvedPath,
       cwd: resolvedCwd,
       reason: `write outside cwd (${resolvedCwd})`,
     });
@@ -159,6 +180,9 @@ export class HitlGate {
    * blanket-gating every read would prompt-storm the user during normal code
    * exploration, while writes to anywhere outside cwd are inherently rare and
    * worth gating universally.
+   *
+   * T25: uses `kind: 'read'` with `path` field; no `cwd` sentinel needed
+   * since the discriminated union's read variant omits cwd entirely.
    */
   async checkRead(input: ReadCheck): Promise<Verdict> {
     const resolvedPath = resolve(input.path);
@@ -166,14 +190,41 @@ export class HitlGate {
     if (!sensitive) return { allowed: true, requiredApproval: false };
 
     const response = await this.opts.requestApproval({
+      kind: 'read',
       requestId: input.requestId,
-      command: `read_file → ${resolvedPath}`,
-      // Reads have no inherent cwd; pass a sentinel so the UI's "cwd:" label
-      // doesn't render the sensitive path itself (which would be misleading).
-      // v2 may introduce a discriminated ApprovalRequest with kind:'read' that
-      // omits cwd entirely, but that requires UI ApprovalPrompt changes.
-      cwd: '(n/a — read operation)',
+      path: resolvedPath,
       reason: `read sensitive path: ${sensitive.reason}`,
+    });
+    if (response.decision === 'approve') {
+      return { allowed: true, requiredApproval: true };
+    }
+    return {
+      allowed: false,
+      requiredApproval: true,
+      feedback: response.feedback ?? 'rejected without feedback',
+    };
+  }
+
+  /**
+   * v1.5 Phase 3 Exoenzyme (T25): gate MCP tool dispatches.
+   *
+   * No static gate — the sensitivity decision was already made by
+   * `germinate_spore` (§5.7) when the wrapper was registered. `checkMcp`
+   * ALWAYS prompts regardless of the tool name. The `(server, tool)` tuple
+   * is the unique audit identity; `argsSummary` is informational.
+   *
+   * Unlike `checkBash`, there is no `isDangerous` pre-filter here — the
+   * caller (germinate_spore) is responsible for deciding which MCP tools
+   * require HITL; once routed here the user must always approve.
+   */
+  async checkMcp(input: McpCheck): Promise<Verdict> {
+    const response = await this.opts.requestApproval({
+      kind: 'mcp',
+      requestId: input.requestId,
+      server: input.server,
+      tool: input.tool,
+      argsSummary: input.argsSummary,
+      reason: input.reason,
     });
     if (response.decision === 'approve') {
       return { allowed: true, requiredApproval: true };

@@ -62,7 +62,9 @@ describe('App', () => {
       userInput: 'do thing',
       reasoning: null,
       content: '',
-      approvalRequests: [{ requestId: 'r1', command: 'rm -rf x', cwd: '/x', reason: 'why' }],
+      approvalRequests: [
+        { kind: 'bash', requestId: 'r1', command: 'rm -rf x', cwd: '/x', reason: 'why' },
+      ],
       phase: 'streaming',
       turns: [],
       toolCalls: [],
@@ -139,8 +141,8 @@ describe('App', () => {
       reasoning: null,
       content: '',
       approvalRequests: [
-        { requestId: 'r1', command: 'rm -rf /tmp/a', cwd: '/', reason: 'rm-rf' },
-        { requestId: 'r2', command: 'rm -rf /tmp/b', cwd: '/', reason: 'rm-rf' },
+        { kind: 'bash', requestId: 'r1', command: 'rm -rf /tmp/a', cwd: '/', reason: 'rm-rf' },
+        { kind: 'bash', requestId: 'r2', command: 'rm -rf /tmp/b', cwd: '/', reason: 'rm-rf' },
       ],
       phase: 'streaming',
       turns: [],

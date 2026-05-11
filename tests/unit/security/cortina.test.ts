@@ -65,8 +65,9 @@ describe('HitlGate.checkWrite — cwd confinement', () => {
     expect(verdict).toMatchObject({ requiredApproval: true });
     expect(requestApproval).toHaveBeenCalledWith(
       expect.objectContaining({
+        kind: 'write',
         requestId: 'req-3',
-        command: expect.stringContaining('write_file →'),
+        path: outsidePath,
         reason: expect.stringContaining('write outside cwd'),
       }),
     );

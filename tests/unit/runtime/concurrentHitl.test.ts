@@ -17,10 +17,22 @@
 import { describe, expect, it } from 'vitest';
 
 describe('Concurrent HITL approval (Phase 17 Task 106 — m5 BLOCKER fix)', () => {
-  // Shared types for both tests below — identical to production's
-  // ApprovalRequest/ApprovalResponse shape from src/security/hitlGate.ts.
+  // Shared types for both tests below — mirrors the production discriminated
+  // union from src/security/hitlGate.ts. The bash variant is used here because
+  // the concurrent-queue contract is kind-agnostic; it only cares about requestId.
   type ApprovalResponse = { decision: 'approve' | 'reject'; feedback?: string };
-  type ApprovalRequest = { requestId: string; command: string; cwd: string; reason: string };
+  type ApprovalRequest =
+    | { kind: 'bash'; requestId: string; command: string; cwd: string; reason: string }
+    | { kind: 'write'; requestId: string; path: string; cwd: string; reason: string }
+    | { kind: 'read'; requestId: string; path: string; reason: string }
+    | {
+        kind: 'mcp';
+        requestId: string;
+        server: string;
+        tool: string;
+        argsSummary: string;
+        reason: string;
+      };
 
   it('Map<requestId, fn> resolves both promises when 2 HITL requests arrive before either is answered', async () => {
     // We model the contract enforced by src/index.ts at the data-shape level
@@ -48,8 +60,20 @@ describe('Concurrent HITL approval (Phase 17 Task 106 — m5 BLOCKER fix)', () =
     }
 
     // Two requests fire concurrently — neither is resolved yet.
-    const p1 = requestApproval({ requestId: 'r1', command: 'a', cwd: '/', reason: 'x' });
-    const p2 = requestApproval({ requestId: 'r2', command: 'b', cwd: '/', reason: 'y' });
+    const p1 = requestApproval({
+      kind: 'bash',
+      requestId: 'r1',
+      command: 'a',
+      cwd: '/',
+      reason: 'x',
+    });
+    const p2 = requestApproval({
+      kind: 'bash',
+      requestId: 'r2',
+      command: 'b',
+      cwd: '/',
+      reason: 'y',
+    });
     expect(resolvers.size).toBe(2);
     expect(pending.length).toBe(2);
 

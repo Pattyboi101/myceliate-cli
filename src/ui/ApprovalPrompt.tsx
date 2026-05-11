@@ -22,15 +22,54 @@ export function ApprovalPrompt({
       onResponse({ decision: 'reject' });
     }
   });
+  // T25: render the appropriate fields based on the request kind.
+  const renderKindFields = (): React.JSX.Element => {
+    switch (request.kind) {
+      case 'bash':
+        return (
+          <>
+            <Text>
+              Command: <Text bold>{request.command}</Text>
+            </Text>
+            <Text>Cwd: {request.cwd}</Text>
+          </>
+        );
+      case 'write':
+        return (
+          <>
+            <Text>
+              Write to: <Text bold>{request.path}</Text>
+            </Text>
+            <Text>Cwd: {request.cwd}</Text>
+          </>
+        );
+      case 'read':
+        return (
+          <Text>
+            Read: <Text bold>{request.path}</Text>
+          </Text>
+        );
+      case 'mcp':
+        return (
+          <>
+            <Text>
+              Server: <Text bold>{request.server}</Text>
+            </Text>
+            <Text>
+              Tool: <Text bold>{request.tool}</Text>
+            </Text>
+            <Text>Args: {request.argsSummary}</Text>
+          </>
+        );
+    }
+  };
+
   return (
     <Box flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1}>
       <Text bold color="yellow">
         ⚠ Approval required
       </Text>
-      <Text>
-        Command: <Text bold>{request.command}</Text>
-      </Text>
-      <Text>Cwd: {request.cwd}</Text>
+      {renderKindFields()}
       <Text>Reason: {request.reason}</Text>
       <Text dimColor>Press Y to approve, N to reject.</Text>
     </Box>

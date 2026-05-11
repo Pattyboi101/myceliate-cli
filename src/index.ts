@@ -302,14 +302,15 @@ async function main(): Promise<void> {
       onActiveSporeChange: (name) => {
         // Phase 21: /spore pin or /spore unpin changed the active spore.
         // Phase 23: also update the registry allowlist via setActiveSpore.
-        // Phase 3 (T29): fire-and-forget teardown on unpin (void is safe — crash-
-        // recovery pattern from T27; setOnUnexpectedExit callback is also fire-and-forget).
         if (name === null) {
           const prev = activeSpore;
           uiActiveSpore = null;
           activeSpore = null;
           setActiveSpore(null);
           if (prev !== null) {
+            // Phase 3 (T29): onActiveSporeChange is typed void (sync Ink callback — cannot await).
+            // Fire-and-forget is the only option here; errors are swallowed by teardownMcpSpore's
+            // own defensive path (T27 pattern — see bootTools.ts teardownMcpSpore).
             void teardownMcpSpore(prev);
           }
         } else {
@@ -469,7 +470,7 @@ async function main(): Promise<void> {
     ink.unmount();
     await queueEvents.close();
     await queue.close();
-    await mcpLifecycle.teardownAll(); // Phase 3 (T29): shut down all MCP servers before worker
+    await mcpLifecycle.teardownAll(); // Phase 3 (T29): allSettled semantics — individual MCP teardown failures do not abort worker.shutdown()
     await worker.shutdown();
   }
 }

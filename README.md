@@ -14,6 +14,8 @@ Implements the **Thin Agent / Fat Platform** paradigm: a central orchestrator ma
 - **Security** — static-regex secret redaction at the egress boundary; HITL approval gate for high-risk shell ops.
 - **Compaction** — layers 1–3 (budget pruning, history snipping, cache-aware micro-compaction). Layers 4–5 (ACE virtual projections, structured 9-section auto-compaction) are deferred to v2.
 
+External MCP servers (Playwright, Postgres, etc.) are integrated via skill-based translation. `myceliate mcp install <name> --command <cmd>` translates the server's tool schema into a Markdown skill at `~/.myceliate/skills/<name>/`; the orchestrator germinates the resulting spore on demand, the platform spawns the MCP server lazily and exposes namespaced tool wrappers. The translated SKILL.md is editable — user-augmented content below the auto-gen marker survives `--regenerate`.
+
 See [`CLAUDE.md`](./CLAUDE.md) for architectural constraints and [`docs/superpowers/plans/`](./docs/superpowers/plans/) for the implementation plan.
 
 ## Setup

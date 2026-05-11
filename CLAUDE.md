@@ -58,9 +58,9 @@ All tool definitions submitted to the API set `additionalProperties: false`, lis
 
 Never call non-streaming completion endpoints. Every adapter's primary entry point is `stream(request)`. Buffered/awaited responses are built by collecting the stream where needed (testing, logging) — never the other way around.
 
-### R5 — Native shell over MCP for local tools
+### R5 — Native shell + skill-translated MCP for tools
 
-File reads, writes, directory listings, `grep`, and shell execution are native TypeScript tools registered in `src/tools/`. They are never wrapped in an MCP server. MCP is reserved for v2 external integrations (issue trackers, cloud DBs) that genuinely require auth and routing.
+Local tools (file, shell, grep) are native TypeScript per R5. **External integrations** (browser automation, DB introspection, third-party APIs) use MCP under the skill-based translation pattern (§5 spec): the platform owns the MCP server lifecycle and JSON-RPC wire; spores see only translated Markdown skills + namespaced tool wrappers. Raw schema injection is **never** acceptable — Vector 6 of the strategic research brief documents the token-economics rationale (10–50k tokens/turn raw vs ~500 tokens/turn skill-based).
 
 ### R6 — Heavy I/O goes through BullMQ; the main loop never blocks
 
@@ -185,7 +185,7 @@ If you find yourself building any of the following, stop and surface the scope e
 - Daemonised heartbeat / cron-style proactive checks
 - Full ephemeral execution sandboxing (microVM, `unshare`, gVisor)
 - Continuous-learning skill synthesis (Hermes-style)
-- MCP server integration
+- *(MCP server integration lifted in v1.5 Phase 3 under the skill-based translation pattern; see §5 of `docs/superpowers/specs/v1.5-mycelium-design.md`. Raw schema injection remains rejected.)*
 - FTS5 / SQLite memory store
 - Worker / QueueEvents dual Redis connection (R6) — `src/queue/worker.ts` currently shares the `getRedis()` singleton across `Worker` and `QueueEvents`. BullMQ recommends separate `Redis` instances to avoid blocking-read deadlocks under load. Acceptable for the v1 vertical slice; production-readiness needs the split.
 - Dangerous-pattern `\bsudo\b` over-trips on benign mentions (`echo "sudo manual"`, commit messages containing the word, log lines). Conservative v1 posture — better to require HITL approval on a false positive than miss a real escalation. v2 may tighten with start-of-line or argument-position anchors once usage data shows the false-positive volume.

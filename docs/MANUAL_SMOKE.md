@@ -197,6 +197,76 @@ All 6 sections complete with no errors thrown. v1.3 tag candidate.
    - `/spore pin research`.
    - Expected: orchestrator boots without crash; the prior write_file tool_call is in the rehydrated history; current turn's tool list excludes write_file.
 
+## Walk-point 10 — MCP integration (Phase 3 Exoenzyme)
+
+**Walk-point 10 (Phase 3 Exoenzyme):**
+1. `myceliate mcp install playwright --command npx --arg '@playwright/mcp@latest'`
+   Expected: `~/.myceliate/skills/playwright/{manifest.yaml, SKILL.md, commands/*.md}` exist.
+   Inspect SKILL.md — confirm auto-gen marker, capability list, no sensitive section
+   (Playwright tools are not declared sensitive by default).
+
+   **Atomic install regression**: re-run with a deliberately failing command
+   (`--command nonexistent-binary --arg foo`). Expected: clear error to stdout;
+   NO partial `~/.myceliate/skills/playwright/` directory left behind; staging
+   dir under `~/.myceliate/skills/.staging/` cleaned up by the catch block.
+
+2. `myceliate` → free-form prompt: "open https://example.com and read me the page title."
+   Expected: orchestrator emits `germinate_spore('playwright')`, Ink shows germination card,
+   `.myceliate/logs/agent.log` shows MCP server spawn + `initialize` handshake within 5s,
+   `.myceliate/logs/mcp-playwright.log` exists with browser-launch chatter,
+   subsequent iterations call `playwright_navigate` then `playwright_snapshot`,
+   tool results land in the agent's history, model returns the title.
+
+3. `/spore pin <other-non-mcp-spore>` (e.g. frontend-design or any hand-authored sector spore).
+   Expected (multi-active model — §5.1.6): the new spore's body REPLACES playwright's body
+   section in the system prompt (single-active body). BUT playwright's MCP server stays
+   alive, `playwright_*` tool wrappers REMAIN in the registry (verify via `/spore tools`),
+   and the model can still call them via their JSON Schema tool definitions.
+
+4. **Cross-domain workflow**: install postgres MCP-spore (see step 8 below), then
+   `/spore pin postgres`. Run a multi-step task using BOTH:
+   "Look up the test user `user@example.com` in the postgres `users` table, then log in
+   to https://example.com/login as that user via Playwright."
+   Expected: postgres MCP server spawns; postgres SKILL.md body now in prompt; playwright
+   wrappers STILL registered. Both servers stay alive across the cross-domain workflow.
+
+5. **Explicit teardown via `/spore unpin`**. The handler tears down the active spore's
+   MCP server if it has one. Expected: postgres MCP server child terminates within 2s
+   grace; `postgres_*` wrappers deregister; a system-message StreamEvent surfaces
+   ("MCP server for 'postgres' terminated; N tool wrapper(s) deregistered.").
+   Playwright wrappers STAY (it's not the active spore). To free playwright now,
+   `/spore pin playwright` (no-op idempotent spawn) → `/spore unpin`. v1.6+ may add
+   `/spore unpin <name>` for direct teardown of any active MCP-spore (per §5.12).
+
+6. **Crash recovery**: while playwright is germinated, manually `kill -9` the playwright
+   server child (find via `ps aux | grep playwright`).
+   Expected: orchestrator detects unexpected exit within milliseconds via the
+   `child.on('exit')` listener bridged to `McpLifecycle.onUnexpectedExit`. Tool wrappers
+   `playwright_*` deregister automatically. A system-message StreamEvent surfaces in chat:
+   "MCP server for 'playwright' terminated; N tool wrapper(s) deregistered."
+   `.myceliate/logs/agent.log` records the exit code/signal.
+
+7. Force-kill the orchestrator (Ctrl+C twice).
+   Expected: `ps aux | grep -E 'playwright|server-postgres'` shows no surviving
+   server children. The `finally` block in `src/index.ts` invoked `lifecycle.teardownAll()`.
+
+8. Postgres MCP setup (used by steps 4–7):
+   `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=test postgres:16`
+   `myceliate mcp install postgres --command npx --arg '@modelcontextprotocol/server-postgres' --arg postgresql://postgres:test@localhost:5432/postgres`
+   Manifest hand-edit: add `mcp_server.sensitive_tools: ['execute_query']` (or whatever
+   the upstream server names its mutation tool).
+   Run a multi-turn task that first reads schema (`list_tables`, `describe_table` —
+   should NOT prompt) and then issues a write (`execute_query` — SHOULD prompt
+   via the kind:'mcp' approval card; verify the card shows Server: postgres,
+   Tool: execute_query, the args summary, and the reason).
+
+9. **Hang protection**: with postgres germinated, intentionally trigger a long query
+   (e.g. `SELECT pg_sleep(60)` while `MCP_CALL_TIMEOUT_MS=5000`).
+   Expected: orchestrator returns a tool_result with `isError: true` after ~5s carrying
+   the `McpToolTimeoutError` message (`MCP tool "postgres.execute_query" exceeded
+   callTimeoutMs (5000ms)...`). Postgres server stays alive (no auto-teardown on
+   timeout — only on crash). Model decides whether to retry, abort, or change tactic.
+
 ## Walk-point 9 — Model routing (Phase 2)
 
 After running any multi-turn orchestrator task, `tail .myceliate/logs/agent.log` should show:

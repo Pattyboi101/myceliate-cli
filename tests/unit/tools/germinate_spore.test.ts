@@ -335,6 +335,10 @@ describe('germinate_spore tool', () => {
     // Both clients were spawned
     expect(lifecycle.spawn).toHaveBeenCalledTimes(2);
 
+    // Both clients still alive — no teardown happened (multi-active §5.1.6)
+    expect(playwrightClient.close).not.toHaveBeenCalled();
+    expect(postgresClient.close).not.toHaveBeenCalled();
+
     // Body injection: postgres body is the latest (single-active-body semantics)
     // Both bodies were appended (appendSystemPrompt uses replaceGerminatedSection externally)
     expect(appendedBodies).toHaveLength(2);

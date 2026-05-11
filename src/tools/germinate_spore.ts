@@ -62,7 +62,11 @@ export interface GerminateSporeTool {
  * HitlGate approval UI. Sliced to 80 chars to keep the approval prompt compact.
  */
 function summarizeArgs(input: unknown): string {
-  return JSON.stringify(input).slice(0, 80);
+  try {
+    return JSON.stringify(input).slice(0, 80);
+  } catch {
+    return '[non-serializable]';
+  }
 }
 
 /**
@@ -114,7 +118,13 @@ export function createGerminateSporeTool(deps: GerminateSporeDeps): GerminateSpo
         }
 
         // Step 2b: for each MCP tool, register a namespaced wrapper (if not already present).
-        const toolDescriptors = await client.listTools();
+        let toolDescriptors: Awaited<ReturnType<typeof client.listTools>>;
+        try {
+          toolDescriptors = await client.listTools();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { ok: false, error: `Failed to list MCP tools for "${name}": ${message}` };
+        }
         const toolRegistry = deps.toolRegistry;
         const hitlGate = deps.hitlGate;
 

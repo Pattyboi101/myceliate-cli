@@ -31,6 +31,7 @@ import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
 import { bootTools } from './runtime/bootTools.js';
+import { McpLifecycle } from './runtime/mcpLifecycle.js';
 import { runReplSession } from './runtime/replSession.js';
 import { buildTurnsFromHistory, isSafeToResume } from './runtime/resume.js';
 import { checkAndWarnEnvOverride } from './runtime/roleToModel.js';
@@ -207,10 +208,16 @@ async function main(): Promise<void> {
     logsDir: join(ctx.memoryDir, 'logs'), // matches createLogger usage at index.ts:63
   });
 
+  // Phase 3: construct McpLifecycle for MCP server process management.
+  const mcpLifecycle = new McpLifecycle({
+    logger,
+    logsDir: join(ctx.memoryDir, 'logs'),
+  });
+
   // Phase 23: bootTools extracts the tool registration block from index.ts and
   // adds setActiveSpore for allowlist management (Phase 23 Task 3).
   let bootWarnings: string[] = [];
-  const { tools, setActiveSpore } = bootTools({
+  const { tools, setActiveSpore, teardownMcpSpore } = bootTools({
     hitl,
     queue,
     queueEvents,
@@ -243,6 +250,7 @@ async function main(): Promise<void> {
       bootWarnings = [...bootWarnings, msg];
       rerender({ ...state, bootWarnings });
     },
+    mcpLifecycle,
   });
 
   // Apply initial allowlist if a spore was already active at boot
@@ -285,6 +293,7 @@ async function main(): Promise<void> {
       sporeRegistry: spores.registry,
       logger,
       getActiveSpore: () => activeSpore,
+      teardownMcpSpore,
       onSlashOutput: (text) => {
         // Phase 21: render slash command output as a completed turn (no streaming).
         const newTurn: CompletedTurn = { userInput: '', content: text };
@@ -293,10 +302,16 @@ async function main(): Promise<void> {
       onActiveSporeChange: (name) => {
         // Phase 21: /spore pin or /spore unpin changed the active spore.
         // Phase 23: also update the registry allowlist via setActiveSpore.
+        // Phase 3 (T29): fire-and-forget teardown on unpin (void is safe — crash-
+        // recovery pattern from T27; setOnUnexpectedExit callback is also fire-and-forget).
         if (name === null) {
+          const prev = activeSpore;
           uiActiveSpore = null;
           activeSpore = null;
           setActiveSpore(null);
+          if (prev !== null) {
+            void teardownMcpSpore(prev);
+          }
         } else {
           const rec = spores.registry.get(name);
           if (rec) {
@@ -454,6 +469,7 @@ async function main(): Promise<void> {
     ink.unmount();
     await queueEvents.close();
     await queue.close();
+    await mcpLifecycle.teardownAll(); // Phase 3 (T29): shut down all MCP servers before worker
     await worker.shutdown();
   }
 }

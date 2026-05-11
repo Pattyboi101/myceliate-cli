@@ -60,6 +60,16 @@ export type ReplSessionOptions = {
    * because /spore pin/unpin can change it between turns.
    */
   getActiveSpore?: () => string | null;
+  /**
+   * Phase 3 (T29): closure returned by bootTools() that tears down a single
+   * MCP-spore's server and tool wrappers.  Invoked on `/spore unpin` so that
+   * MCP servers do not outlive the pin that caused their germination.
+   *
+   * Safe to call for non-MCP spores (deregisters 0 wrappers, teardown is a
+   * no-op for unknown spores in McpLifecycle).  Optional — when absent, unpin
+   * proceeds without teardown (backwards-compatible with pre-Phase-3 callers).
+   */
+  teardownMcpSpore?: (sporeName: string) => Promise<void>;
 };
 
 // Phase 12 review m2 fix: `''` removed from QUIT_TOKENS so an accidental empty
@@ -149,9 +159,15 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
         continue;
       }
       if (sub === 'unpin') {
+        const previouslyActive = opts.getActiveSpore?.() ?? null;
         const result = await handleSporeUnpin({ cwd: opts.cwd });
         emitSlash(result.message);
-        if (result.ok) opts.onActiveSporeChange?.(null);
+        if (result.ok) {
+          if (previouslyActive !== null) {
+            await opts.teardownMcpSpore?.(previouslyActive);
+          }
+          opts.onActiveSporeChange?.(null);
+        }
         continue;
       }
       if (sub === 'tools') {

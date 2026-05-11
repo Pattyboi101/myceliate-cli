@@ -3,7 +3,7 @@
 // Atomic install flow for `myceliate mcp install`.
 //
 // Phase 3 (Exoenzyme) §5.6: connects to an MCP server, introspects its tool
-// list, writes manifest.yaml + SKILL.md + commands/*.md into a staging dir,
+// list, writes myceliate.yaml + SKILL.md + commands/*.md into a staging dir,
 // then atomically moves the staging dir to the final target using POSIX
 // rename(2).  Any failure in the middle cleans up the staging dir and re-throws
 // so no partial install is ever left at the target path.
@@ -120,9 +120,9 @@ export async function runMcpInstall(opts: McpInstallOpts): Promise<void> {
     // Step 8: translate schema and write files into staging dir.
     const { skillBody, commandFiles } = translateMcpSchema(tools, manifest, logger);
 
-    // Write manifest.yaml
+    // Write myceliate.yaml
     const manifestYaml = yamlStringify(manifest);
-    await writeFile(join(stagingDir, 'manifest.yaml'), manifestYaml, 'utf-8');
+    await writeFile(join(stagingDir, 'myceliate.yaml'), manifestYaml, 'utf-8');
 
     // Build SKILL.md frontmatter
     const skillFrontmatter = buildSkillFrontmatter(name, description);

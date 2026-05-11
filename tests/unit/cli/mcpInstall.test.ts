@@ -57,7 +57,7 @@ describe('runMcpInstall — successful install', () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  it('writes manifest.yaml, SKILL.md, and commands/*.md into the target dir', async () => {
+  it('writes myceliate.yaml, SKILL.md, and commands/*.md into the target dir', async () => {
     await runMcpInstall({
       name: 'fake',
       command: 'node',
@@ -67,7 +67,7 @@ describe('runMcpInstall — successful install', () => {
     });
 
     const dir = skillDir(home, 'fake');
-    expect(existsSync(join(dir, 'manifest.yaml'))).toBe(true);
+    expect(existsSync(join(dir, 'myceliate.yaml'))).toBe(true);
     expect(existsSync(join(dir, 'SKILL.md'))).toBe(true);
     // fake server exports 3 tools: echo, add, greet
     expect(existsSync(join(dir, 'commands', 'echo.md'))).toBe(true);
@@ -84,7 +84,7 @@ describe('runMcpInstall — successful install', () => {
       regenerate: false,
     });
 
-    const manifestPath = join(skillDir(home, 'fake'), 'manifest.yaml');
+    const manifestPath = join(skillDir(home, 'fake'), 'myceliate.yaml');
     const content = readFileSync(manifestPath, 'utf-8');
     // Should contain namespaced tools
     expect(content).toContain('fake_echo');
@@ -145,7 +145,7 @@ describe('runMcpInstall — error cases', () => {
   it('throws if target dir already exists and --regenerate not set', async () => {
     const dir = skillDir(home, 'fake');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'manifest.yaml'), 'name: fake\n');
+    writeFileSync(join(dir, 'myceliate.yaml'), 'name: fake\n');
 
     await expect(
       runMcpInstall({
@@ -229,7 +229,7 @@ describe('runMcpInstall — --regenerate', () => {
     expect(regenerated).toContain('MYCELIATE: AUTO-GENERATED ABOVE');
   });
 
-  it('regenerate writes fresh manifest.yaml (replaces old one)', async () => {
+  it('regenerate writes fresh myceliate.yaml (replaces old one)', async () => {
     // First install
     await runMcpInstall({
       name: 'fake',
@@ -240,7 +240,7 @@ describe('runMcpInstall — --regenerate', () => {
     });
 
     // Corrupt the manifest to detect replacement
-    const manifestPath = join(skillDir(home, 'fake'), 'manifest.yaml');
+    const manifestPath = join(skillDir(home, 'fake'), 'myceliate.yaml');
     writeFileSync(manifestPath, 'corrupted: true\n');
 
     await runMcpInstall({

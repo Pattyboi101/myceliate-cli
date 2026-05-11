@@ -66,10 +66,9 @@ afterEach(async () => {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Build a minimal Spore object for the installed fake-spore, suitable for
- * McpLifecycle.spawn(). SporeRegistry reads myceliate.yaml but mcpInstall
- * writes manifest.yaml — so we construct the Spore directly from the installed
- * files rather than going through SporeRegistry.discover().
+ * Build a Spore object directly from the install output, bypassing
+ * SporeRegistry.discover(). This is a test-fixture shortcut to keep the
+ * end-to-end test simple — production code uses discover() at boot.
  */
 function buildFakeSpore(sporeDir: string): Spore {
   return {
@@ -113,7 +112,7 @@ describe('MCP end-to-end: translation reaches the wire', () => {
     });
 
     const sporeDir = join(tmpHome, '.myceliate', 'skills', 'fake-spore');
-    expect(existsSync(join(sporeDir, 'manifest.yaml'))).toBe(true);
+    expect(existsSync(join(sporeDir, 'myceliate.yaml'))).toBe(true);
     expect(existsSync(join(sporeDir, 'SKILL.md'))).toBe(true);
     expect(existsSync(join(sporeDir, 'commands', 'echo.md'))).toBe(true);
 
@@ -228,7 +227,7 @@ describe('MCP end-to-end: translation reaches the wire', () => {
     });
 
     const sporeDir = join(tmpHome, '.myceliate', 'skills', 'fake-spore');
-    expect(existsSync(join(sporeDir, 'manifest.yaml'))).toBe(true);
+    expect(existsSync(join(sporeDir, 'myceliate.yaml'))).toBe(true);
     expect(existsSync(join(sporeDir, 'SKILL.md'))).toBe(true);
     expect(existsSync(join(sporeDir, 'commands', 'echo.md'))).toBe(true);
     expect(existsSync(join(sporeDir, 'commands', 'add.md'))).toBe(true);

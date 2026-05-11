@@ -395,6 +395,76 @@ describe('germinate_spore tool', () => {
     ).toHaveLength(1);
   });
 
+  it('idempotent re-germination (Scenario B): skips wrapper re-registration when allowlist is active', async () => {
+    // Scenario B: the spore was already germinated and setActiveAllowlist was called with the
+    // namespaced tool names (simulating setActiveSporeFromGerminate). A second germinate call must
+    // still detect the existing wrappers via byCapability('execution') — which is allowlist-agnostic
+    // — and skip re-registration rather than throwing "Tool already registered".
+    const bundledDir = join(workspace, 'bundled');
+    const cwd = join(workspace, 'project-cwd');
+    await mkdir(bundledDir, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    await buildMcpFixtureSpore(bundledDir, 'playwright', '#ff0000');
+
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
+
+    const stubTools: McpToolDescriptor[] = [
+      {
+        name: 'navigate',
+        description: 'Navigate to a URL',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
+        name: 'screenshot',
+        description: 'Take a screenshot',
+        inputSchema: { type: 'object', properties: {} },
+      },
+    ];
+    const client = buildStubMcpClient(stubTools);
+    const lifecycle = buildStubLifecycle(client);
+    const toolRegistry = new ToolRegistry();
+    const hitlGate = new HitlGate({
+      requestApproval: vi.fn().mockResolvedValue({ decision: 'approve' }),
+    });
+
+    const tool = createGerminateSporeTool({
+      registry,
+      cwd,
+      emit: () => {},
+      appendSystemPrompt: () => {},
+      mcpLifecycle: lifecycle,
+      toolRegistry,
+      hitlGate,
+    });
+
+    // First germination — registers playwright_navigate + playwright_screenshot
+    await tool.handler({ name: 'playwright' });
+    expect(
+      toolRegistry.byCapability('execution').filter((t) => t.name.startsWith('playwright_')),
+    ).toHaveLength(2);
+
+    // Simulate setActiveSporeFromGerminate setting the allowlist to the namespaced tool names.
+    // With the old getActiveTools() check, re-germination would also detect the wrappers here
+    // because the allowlist exactly matches. With byCapability() it's allowlist-agnostic.
+    toolRegistry.setActiveAllowlist(['playwright_navigate', 'playwright_screenshot']);
+
+    // Re-germinate the same spore — must be a no-op for wrapper registration.
+    // If re-registration were attempted, ToolRegistry.register throws "Tool already registered"
+    // and the handler call would reject. resolves.toMatchObject ensures no throw.
+    await expect(tool.handler({ name: 'playwright' })).resolves.toMatchObject({ ok: true });
+
+    // spawn was called twice (McpLifecycle handles its own idempotency, not germinate_spore)
+    expect(lifecycle.spawn).toHaveBeenCalledTimes(2);
+
+    // Still exactly 2 wrappers — no duplicates
+    expect(
+      toolRegistry.byCapability('execution').filter((t) => t.name.startsWith('playwright_')),
+    ).toHaveLength(2);
+  });
+
   it('failed spawn surfaces a stream-event error; no registry corruption', async () => {
     const bundledDir = join(workspace, 'bundled');
     const cwd = join(workspace, 'project-cwd');

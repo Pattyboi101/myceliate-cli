@@ -122,7 +122,10 @@ export function createGerminateSporeTool(deps: GerminateSporeDeps): GerminateSpo
           const namespacedName = `${spore.name}_${descriptor.name}`;
 
           // Idempotent re-germination: skip if wrapper already registered.
-          if (toolRegistry.getActiveTools().some((t) => t.name === namespacedName)) {
+          // Use byCapability('execution') rather than getActiveTools() so the check
+          // is allowlist-agnostic — registered wrappers are detected regardless of
+          // whether they appear in the current activeAllowlist (Scenario B fix).
+          if (toolRegistry.byCapability('execution').some((t) => t.name === namespacedName)) {
             continue;
           }
 

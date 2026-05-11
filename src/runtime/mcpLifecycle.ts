@@ -274,4 +274,25 @@ export class McpLifecycle {
   listActive(): string[] {
     return [...this._active.keys()];
   }
+
+  /**
+   * Phase 3 (T27): late-bind the onUnexpectedExit callback after construction.
+   *
+   * Design rationale: `McpLifecycle` is constructed in `main()` before
+   * `bootTools()` runs, but `teardownMcpSpore` (the correct handler) can only
+   * be built inside `bootTools()` because it closes over the local `tools`
+   * ToolRegistry.  Rather than requiring callers to use a forward-ref closure,
+   * this one-line setter allows `bootTools()` to register the handler after
+   * construction without restructuring either callsite.  The setter is safe to
+   * call multiple times (last-write-wins, consistent with the opts field it
+   * overwrites).
+   */
+  setOnUnexpectedExit(
+    handler: (
+      sporeName: string,
+      exitInfo: { code: number | null; signal: NodeJS.Signals | null },
+    ) => void,
+  ): void {
+    this._opts.onUnexpectedExit = handler;
+  }
 }

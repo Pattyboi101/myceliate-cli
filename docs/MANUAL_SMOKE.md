@@ -197,6 +197,16 @@ All 6 sections complete with no errors thrown. v1.3 tag candidate.
    - `/spore pin research`.
    - Expected: orchestrator boots without crash; the prior write_file tool_call is in the rehydrated history; current turn's tool list excludes write_file.
 
+## Walk-point 9 — Model routing (Phase 2)
+
+After running any multi-turn orchestrator task, `tail .myceliate/logs/agent.log` should show:
+
+- Subagent dispatches always log `model: 'deepseek-v4-flash'`.
+- Iteration 0 of any orchestrator REPL turn always logs `model: 'deepseek-v4-pro'` (planning bias).
+- Subsequent iterations log Pro if any prior tool-call assistant turn carried `reasoning_content`, Flash otherwise.
+
+To verify the env-override warn: `DEEPSEEK_MODEL=test-override myceliate` should write a single `[myceliate] DEEPSEEK_MODEL env var is set...` line to stderr before Ink mounts, then route every call to `'test-override'`.
+
 ## Walk-point 10 — MCP integration (Phase 3 Exoenzyme)
 
 **Walk-point 10 (Phase 3 Exoenzyme):**
@@ -266,16 +276,6 @@ All 6 sections complete with no errors thrown. v1.3 tag candidate.
    the `McpToolTimeoutError` message (`MCP tool "postgres.execute_query" exceeded
    callTimeoutMs (5000ms)...`). Postgres server stays alive (no auto-teardown on
    timeout — only on crash). Model decides whether to retry, abort, or change tactic.
-
-## Walk-point 9 — Model routing (Phase 2)
-
-After running any multi-turn orchestrator task, `tail .myceliate/logs/agent.log` should show:
-
-- Subagent dispatches always log `model: 'deepseek-v4-flash'`.
-- Iteration 0 of any orchestrator REPL turn always logs `model: 'deepseek-v4-pro'` (planning bias).
-- Subsequent iterations log Pro if any prior tool-call assistant turn carried `reasoning_content`, Flash otherwise.
-
-To verify the env-override warn: `DEEPSEEK_MODEL=test-override myceliate` should write a single `[myceliate] DEEPSEEK_MODEL env var is set...` line to stderr before Ink mounts, then route every call to `'test-override'`.
 
 ### Phase 23 known limitations (v1.5 follow-up)
 

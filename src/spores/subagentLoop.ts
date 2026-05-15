@@ -1,5 +1,7 @@
 import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { Message } from '../adapters/messages.js';
+import { type CavemanState, applyCavemanPrefix } from '../runtime/cavemanMode.js';
+import { PRICING, calculateCost, toUsageStats } from '../runtime/costCalculator.js';
 import { roleToModel } from '../runtime/roleToModel.js';
 import { HitlGate } from '../security/hitlGate.js';
 import { grepTool } from '../tools/grep.js';
@@ -54,10 +56,23 @@ export interface SubagentLoopArgs {
    * Optional to keep the loop testable without a logger fixture.
    */
   logger?: Logger;
+  /**
+   * Phase 2.5: mutable caveman state forwarded from the orchestrator via
+   * the SpawnRequest JSON payload (scalar active flag reconstructed into
+   * a local CavemanState object in subagentRunner.ts).
+   * When active, applyCavemanPrefix is called before each stream invocation.
+   * Optional — when absent, caveman mode is never applied.
+   */
+  cavemanState?: CavemanState;
 }
 
-export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
-  const { client, personaSkill, task, maxSteps, logger } = args;
+export type SubagentLoopResult = {
+  summary: string;
+  progress: Array<{ step: number; durationMs: number; model: string }>;
+};
+
+export async function runSubagentLoop(args: SubagentLoopArgs): Promise<SubagentLoopResult> {
+  const { client, personaSkill, task, maxSteps, logger, cavemanState } = args;
   const registry = buildSubagentRegistry();
   const tools = registry.definitions();
   const subagentModel = roleToModel('subagent');
@@ -67,13 +82,20 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
   ];
   let step = 0;
   let final = '';
+  const progress: Array<{ step: number; durationMs: number; model: string }> = [];
   while (step < maxSteps) {
+    const stepStart = Date.now();
     let assistantText = '';
     const toolCalls: Array<{ id: string; name: string; args: unknown }> = [];
     logger?.info({ event: 'request_started', role: 'subagent', model: subagentModel, step });
+    // Phase 2.5: apply caveman prefix before each stream call so the directive
+    // is always the first message seen by the model on this step. applyCavemanPrefix
+    // is a pure function that returns a new array — it does not mutate messages.
+    const stepMessages =
+      cavemanState !== undefined ? applyCavemanPrefix(messages, cavemanState) : messages;
     for await (const event of client.stream({
       model: subagentModel,
-      messages,
+      messages: stepMessages,
       tools,
       thinking: false,
       strict: true,
@@ -82,8 +104,34 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
         if (event.type === 'content_delta') assistantText += event.text;
         if (event.type === 'tool_call')
           toolCalls.push({ id: event.id, name: event.name, args: event.args });
+        if (event.type === 'done') {
+          // Phase 2.5: emit cost telemetry per step. Subagent runs in a
+          // subprocess with no callback path — logger-only (no onCostEstimate).
+          const u = event.usage;
+          if (u.promptTokens > 0 || u.completionTokens > 0) {
+            const usageStats = toUsageStats(u);
+            const breakdown = calculateCost(subagentModel, usageStats);
+            logger?.info({
+              event: 'cost_estimated',
+              role: 'subagent',
+              model: subagentModel,
+              step,
+              inputTokens: u.promptTokens,
+              outputTokens: u.completionTokens,
+              cachedInputTokens: u.cacheHitTokens ?? 0,
+              inputCost: breakdown.inputCost,
+              outputCost: breakdown.outputCost,
+              cacheHitCost: breakdown.cacheHitCost,
+              totalCost: breakdown.totalCost,
+            });
+            if (!(subagentModel in PRICING)) {
+              logger?.warn({ event: 'cost_unknown_model', model: subagentModel });
+            }
+          }
+        }
       }
     }
+    progress.push({ step, durationMs: Date.now() - stepStart, model: subagentModel });
     messages.push({ role: 'assistant', content: assistantText });
     if (toolCalls.length === 0) {
       final = assistantText;
@@ -114,5 +162,5 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
     }
     step += 1;
   }
-  return final || '(no final answer — loop hit max steps)';
+  return { summary: final || '(no final answer — loop hit max steps)', progress };
 }

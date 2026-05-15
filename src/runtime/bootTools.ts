@@ -14,6 +14,7 @@ import { ToolRegistry } from '../tools/registry.js';
 import { createSpawnSubagentTool } from '../tools/spawn_subagent.js';
 import { createWriteFileTool } from '../tools/writeFile.js';
 import type { Logger } from '../util/logger.js';
+import type { CavemanState } from './cavemanMode.js';
 import type { McpLifecycle } from './mcpLifecycle.js';
 import type { WorkerHandle } from './workerLifecycle.js';
 
@@ -45,6 +46,21 @@ export interface BootToolsOpts {
    * When absent, teardownMcpSpore is a no-op for the lifecycle.teardown call.
    */
   mcpLifecycle?: McpLifecycle;
+  /**
+   * Phase 2.5: mutable caveman state created at boot. Forwarded into the
+   * spawn_subagent tool wrapper so the subagent subprocess receives the current
+   * active flag via the SpawnRequest JSON payload (scalar boolean crossing the
+   * process boundary per R8).
+   * Optional — when absent, cavemanActive is not included in SpawnRequest.
+   */
+  cavemanState?: CavemanState;
+  /**
+   * Fix-pass (review): injectable spawn function for unit tests. When provided,
+   * replaces the default `childProcessSpawn` inside the spawn_subagent wrapper
+   * so tests can exercise the re-emission path without forking a real subprocess.
+   * Production callers MUST NOT supply this — omitting it selects the real spawn.
+   */
+  _spawnFnOverride?: Parameters<typeof createSpawnSubagentTool>[0]['spawn'];
 }
 
 export interface BootToolsResult {
@@ -125,9 +141,25 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
   const spawnTool = createSpawnSubagentTool({
     registry: opts.registry,
     activeSpore: opts.activeSporeRef ?? (() => null),
-    spawn: (req) => childProcessSpawn(req),
+    // Phase 2.5: forward the current caveman active flag into every SpawnRequest.
+    // opts.cavemanState is a mutable reference — reading state.active here (at
+    // spawn time, not at bootTools() call time) captures the value the user has
+    // set via /caveman up to this moment.
+    // _spawnFnOverride is only set by unit tests — production callers omit it.
+    spawn: opts._spawnFnOverride
+      ? opts._spawnFnOverride
+      : (req) =>
+          childProcessSpawn({
+            ...req,
+            ...(opts.cavemanState !== undefined ? { cavemanActive: opts.cavemanState.active } : {}),
+          }),
   });
   // Wrap spawn_subagent to fit ToolRegistry's Tool<Input> interface.
+  // Phase 2.5 (T37): after the subagent responds, re-emit each progress entry as a
+  // `subagent_step` stream event into the orchestrator's own stream so the live
+  // telemetry footer (T39/T40) can subscribe without parsing tool_result content.
+  // `emit` is the same closure used by `germinate_spore` and `teardownMcpSpore`
+  // for their synthetic lifecycle events — the same seam, no new infrastructure.
   tools.register({
     name: 'spawn_subagent',
     description: spawnTool.description,
@@ -135,6 +167,16 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
     inputSchema: { kind: 'zod', zod: spawnTool.inputSchema },
     run: async (input, _ctx) => {
       const result = await spawnTool.handler(input);
+      if (result.ok) {
+        for (const entry of result.progress ?? []) {
+          emit({
+            type: 'subagent_step',
+            step: entry.step,
+            durationMs: entry.durationMs,
+            model: entry.model,
+          });
+        }
+      }
       return JSON.stringify(result);
     },
   });

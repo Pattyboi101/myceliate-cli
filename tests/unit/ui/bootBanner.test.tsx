@@ -14,6 +14,8 @@ const baseState: AppState = {
   toolCalls: [],
   activeSpore: null,
   bootWarnings: [],
+  lastTurnCost: 0,
+  sessionTotalCost: 0,
 };
 
 describe('App boot warnings banner', () => {

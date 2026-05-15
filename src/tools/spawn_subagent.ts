@@ -12,17 +12,38 @@ export const SpawnSubagentInputSchema = z
 export type SpawnSubagentInput = z.infer<typeof SpawnSubagentInputSchema>;
 
 export type SpawnSubagentResult =
-  | { ok: true; persona: string; summary: string }
+  | {
+      ok: true;
+      persona: string;
+      summary: string;
+      progress?: Array<{ step: number; durationMs: number; model: string }>;
+    }
   | { ok: false; error: string; stderr_tail?: string };
 
 export interface SpawnRequest {
   persona_name: string;
   persona_skill: string;
   task: string;
+  /** Phase 2.5: forward caveman active state across process boundary. */
+  cavemanActive?: boolean;
 }
 
+const ProgressEntrySchema = z
+  .object({
+    step: z.number().int().nonnegative(),
+    durationMs: z.number().nonnegative(),
+    model: z.string(),
+  })
+  .strict();
+
 export const SpawnResponseSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), summary: z.string() }).strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      summary: z.string(),
+      progress: z.array(ProgressEntrySchema).optional(),
+    })
+    .strict(),
   z
     .object({
       ok: z.literal(false),
@@ -82,7 +103,12 @@ export function createSpawnSubagentTool(deps: SpawnSubagentDeps): SpawnSubagentT
           ...(response.stderr_tail ? { stderr_tail: response.stderr_tail } : {}),
         };
       }
-      return { ok: true, persona: personaRef.name, summary: response.summary };
+      return {
+        ok: true,
+        persona: personaRef.name,
+        summary: response.summary,
+        ...(response.progress !== undefined ? { progress: response.progress } : {}),
+      };
     },
   };
 }

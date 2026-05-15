@@ -15,6 +15,8 @@ import {
   isError,
   isGermination,
   isReasoningDelta,
+  isRequestStarted,
+  isSubagentStep,
   isSystemMessage,
   isToolCall,
   isToolResult,
@@ -32,6 +34,7 @@ import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
 import { bootTools } from './runtime/bootTools.js';
+import { defaultCavemanState } from './runtime/cavemanMode.js';
 import { McpLifecycle } from './runtime/mcpLifecycle.js';
 import { runReplSession } from './runtime/replSession.js';
 import { buildTurnsFromHistory, isSafeToResume } from './runtime/resume.js';
@@ -63,6 +66,17 @@ async function main(): Promise<void> {
   const sessionId = resumeId ?? randomUUID();
   const logger = createLogger({ logsDir: join(ctx.memoryDir, 'logs') });
   checkAndWarnEnvOverride(logger);
+
+  // Phase 2.5: create mutable caveman state from env at boot.
+  // The same object is passed by reference through to replSession → reactLoop →
+  // QueryEngine.prepareRequest so a /caveman slash command's mutation takes
+  // effect on the very next API request without restarting the session.
+  const cavemanState = defaultCavemanState(process.env);
+  logger.info({
+    event: 'caveman_toggled',
+    active: cavemanState.active,
+    source: 'env-init',
+  });
 
   const onboarding = await runOnboarding({
     ...(process.env.DEEPSEEK_API_KEY ? { apiKey: process.env.DEEPSEEK_API_KEY } : {}),
@@ -140,6 +154,8 @@ async function main(): Promise<void> {
     activeSpore: uiActiveSpore,
     germinationCard: null,
     bootWarnings: [],
+    lastTurnCost: 0,
+    sessionTotalCost: 0,
   };
   const banner = {
     // Banner display only — mirrors the env-override semantics in
@@ -166,10 +182,21 @@ async function main(): Promise<void> {
   const approvalResolvers = new Map<string, (r: ApprovalResponse) => void>();
   let pendingApprovals: ApprovalRequest[] = [];
 
-  const ink = render(React.createElement(App, { state, banner, onPromptSubmit }));
+  const ink = render(
+    React.createElement(App, { state, banner, sessionId, cavemanState, onPromptSubmit }),
+  );
   const rerender = (next: AppState): void => {
     state = next;
-    ink.rerender(React.createElement(App, { state, banner, onPromptSubmit, onApprovalResponse }));
+    ink.rerender(
+      React.createElement(App, {
+        state,
+        banner,
+        sessionId,
+        cavemanState,
+        onPromptSubmit,
+        onApprovalResponse,
+      }),
+    );
   };
 
   // onApprovalResponse must be defined after rerender (which it references).
@@ -189,7 +216,16 @@ async function main(): Promise<void> {
   };
 
   // Re-render with onApprovalResponse now that it is defined.
-  ink.rerender(React.createElement(App, { state, banner, onPromptSubmit, onApprovalResponse }));
+  ink.rerender(
+    React.createElement(App, {
+      state,
+      banner,
+      sessionId,
+      cavemanState,
+      onPromptSubmit,
+      onApprovalResponse,
+    }),
+  );
 
   const hitl = new HitlGate({
     requestApproval: (req: ApprovalRequest) =>
@@ -226,6 +262,7 @@ async function main(): Promise<void> {
     registry: spores.registry,
     cwd,
     logger,
+    cavemanState,
     emit: (ev) => {
       if (isGermination(ev)) {
         uiActiveSpore = { name: ev.spore, accent_color: ev.accent_color };
@@ -300,6 +337,7 @@ async function main(): Promise<void> {
       logger,
       getActiveSpore: () => activeSpore,
       teardownMcpSpore,
+      cavemanState,
       onSlashOutput: (text) => {
         // Phase 21: render slash command output as a completed turn (no streaming).
         const newTurn: CompletedTurn = { userInput: '', content: text };
@@ -376,6 +414,13 @@ async function main(): Promise<void> {
                 : c,
             ),
           });
+        } else if (isSubagentStep(ev)) {
+          // Phase 2.5 (T40): update the subagent progress indicator while the
+          // orchestrator's spawn_subagent tool is running. Cleared on turn_complete.
+          rerender({
+            ...state,
+            subagentStatus: { step: ev.step, durationMs: ev.durationMs },
+          });
         } else if (isTurnComplete(ev)) {
           // F4 reset: clear per-turn reasoning + content buffers so turn N's
           // content does not concatenate onto turn N-1's. Phase 13 review M1:
@@ -398,16 +443,42 @@ async function main(): Promise<void> {
           // queue is correctly drained at REPL boundaries: `onTurnComplete`
           // (after all tool_results have arrived) and `readNextPrompt` (when
           // the user submits the next prompt).
+          //
+          // Phase 2.5 (T40): also clear subagentStatus on the turn boundary —
+          // the orchestrator's turn is complete so any in-flight subagent step
+          // indicator should disappear.
           reasoningText = '';
           contentText = '';
           reasonStartedAt = Date.now();
-          rerender({ ...state, reasoning: null, content: '' });
+          // exactOptionalPropertyTypes: omit the key entirely (don't spread
+          // `subagentStatus: undefined`) to satisfy the optional-property contract.
+          const { subagentStatus: _dropped, ...stateWithoutSubagent } = state;
+          void _dropped;
+          rerender({ ...stateWithoutSubagent, reasoning: null, content: '' });
+        } else if (isRequestStarted(ev)) {
+          // Phase 2.5 (T38): update the active model so ReasoningBlock can
+          // render the routing indicator ("Reasoning (Pro)" / "Reasoning (Flash)").
+          rerender({ ...state, activeModel: ev.model });
         } else if (isError(ev)) {
           logger.error({
             event: 'stream_error',
             message: ev.cause instanceof Error ? ev.cause.message : String(ev.cause),
           });
         }
+      },
+      onCostEstimate: (breakdown) => {
+        // Phase 2.5 (T40): update per-turn token counts + cost, and accumulate
+        // the running session total. CostBreakdown carries raw token counts
+        // alongside the dollar breakdown (option a from the T40 design notes).
+        rerender({
+          ...state,
+          lastTurnUsage: {
+            inputTokens: breakdown.inputTokens,
+            outputTokens: breakdown.outputTokens,
+          },
+          lastTurnCost: breakdown.totalCost,
+          sessionTotalCost: state.sessionTotalCost + breakdown.totalCost,
+        });
       },
       onTurnComplete: async (snapshot) => {
         // Phase 12 review M1 fix: append only the delta since the last flush.
@@ -420,6 +491,8 @@ async function main(): Promise<void> {
         const newTurn: CompletedTurn = { userInput: state.userInput, content: contentText };
         const turns = [...state.turns, newTurn];
         // Reset live region; show prompt input for next turn.
+        // Phase 2.5 (T40): preserve lastTurnUsage, lastTurnCost, sessionTotalCost
+        // across turns — they are cleared only when a new cost estimate arrives.
         reasoningText = '';
         contentText = '';
         rerender({
@@ -433,6 +506,9 @@ async function main(): Promise<void> {
           activeSpore: uiActiveSpore,
           germinationCard: null,
           bootWarnings,
+          lastTurnCost: state.lastTurnCost,
+          sessionTotalCost: state.sessionTotalCost,
+          ...(state.lastTurnUsage !== undefined ? { lastTurnUsage: state.lastTurnUsage } : {}),
         });
       },
       readNextPrompt: async () =>
@@ -450,6 +526,9 @@ async function main(): Promise<void> {
             activeSpore: uiActiveSpore,
             germinationCard: null,
             bootWarnings,
+            lastTurnCost: state.lastTurnCost,
+            sessionTotalCost: state.sessionTotalCost,
+            ...(state.lastTurnUsage !== undefined ? { lastTurnUsage: state.lastTurnUsage } : {}),
           });
           return text;
         }),

@@ -3,6 +3,13 @@ import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { ToolCall } from '../adapters/messages.js';
 import { type StreamEvent, isGermination } from '../adapters/streamEvent.js';
 import type { MarkdownStore } from '../memory/markdownStore.js';
+import type { CavemanState } from '../runtime/cavemanMode.js';
+import {
+  type CostBreakdown,
+  PRICING,
+  calculateCost,
+  toUsageStats,
+} from '../runtime/costCalculator.js';
 import { type SporeRole, roleToModel } from '../runtime/roleToModel.js';
 import { redactSecrets } from '../security/redactor.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -35,6 +42,20 @@ export type ReactLoopOptions = {
    * testable without a logger fixture.
    */
   logger?: Logger;
+  /**
+   * Phase 2.5 cost telemetry: called once per iteration when the `done`
+   * event carries usage stats. Fires AFTER the logger.info call so the
+   * UI can subscribe without parsing the log file. Optional so the loop
+   * remains testable without a cost subscriber.
+   */
+  onCostEstimate?: (breakdown: CostBreakdown) => void;
+  /**
+   * Phase 2.5 caveman: mutable shared reference created at boot.
+   * Passed to engine.prepareRequest each turn so the current active state
+   * is read fresh — a `/caveman` slash command that mutates state.active
+   * takes effect on the very next prepareRequest call.
+   */
+  cavemanState?: CavemanState;
 };
 
 export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<StreamEvent> {
@@ -51,6 +72,10 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
       iter === 0 || opts.engine.hasRetainedReasoning() ? 'repl-with-reasoning' : 'repl-execution';
     const model = opts.model ?? roleToModel(role);
 
+    // Phase 2.5 (T38): yield request_started as a stream event BEFORE the API
+    // call so the UI can update the routing indicator in ReasoningBlock with the
+    // resolved model. The existing logger.info call is preserved alongside it.
+    yield { type: 'request_started', role, model, iter } satisfies StreamEvent;
     opts.logger?.info({ event: 'request_started', role, model, iter });
 
     const request = opts.engine.prepareRequest({
@@ -59,6 +84,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
       thinking: true,
       strict: true,
       ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.cavemanState !== undefined ? { cavemanState: opts.cavemanState } : {}),
     });
 
     let assistantContent = '';
@@ -78,11 +104,42 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
         case 'tool_call':
           pendingCalls.push({ id: ev.id, name: ev.name, args: ev.args });
           break;
-        case 'done':
+        case 'done': {
+          // Phase 2.5: emit cost telemetry whenever usage is present.
+          // `done.usage` is always populated (zero-filled on upstream omission)
+          // per the DeepSeekClient contract; check that tokens are non-zero so
+          // we don't log a meaningless $0.00 entry on mid-stream error cutoffs
+          // that zero-fill the usage block.
+          const u = ev.usage;
+          if (u.promptTokens > 0 || u.completionTokens > 0) {
+            const usageStats = toUsageStats(u);
+            const breakdown = calculateCost(model, usageStats);
+            opts.logger?.info({
+              event: 'cost_estimated',
+              role,
+              model,
+              iter,
+              inputTokens: u.promptTokens,
+              outputTokens: u.completionTokens,
+              cachedInputTokens: u.cacheHitTokens ?? 0,
+              inputCost: breakdown.inputCost,
+              outputCost: breakdown.outputCost,
+              cacheHitCost: breakdown.cacheHitCost,
+              totalCost: breakdown.totalCost,
+            });
+            if (!(model in PRICING)) {
+              opts.logger?.warn({ event: 'cost_unknown_model', model });
+            }
+            opts.onCostEstimate?.(breakdown);
+          }
+          break;
+        }
         case 'error':
         case 'turn_complete':
         case 'tool_result':
         case 'system_message':
+        case 'subagent_step':
+        case 'request_started':
           break;
       }
     }

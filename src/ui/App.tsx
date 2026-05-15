@@ -1,7 +1,8 @@
 // src/ui/App.tsx
-import { Box, Text, useInput } from 'ink';
+import { Box, Static, Text, useInput } from 'ink';
 import { useState } from 'react';
 import type React from 'react';
+import type { CavemanState } from '../runtime/cavemanMode.js';
 import type { ApprovalRequest, ApprovalResponse } from '../security/hitlGate.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
 import { Banner, type BannerInfo } from './Banner.js';
@@ -9,6 +10,7 @@ import { ContentStream } from './ContentStream.js';
 import { GerminationCard } from './GerminationCard.js';
 import { InputBox } from './InputBox.js';
 import { ReasoningBlock } from './ReasoningBlock.js';
+import { TelemetryFooter } from './TelemetryFooter.js';
 import { ToolCallCard, type ToolCallCardState } from './ToolCallCard.js';
 import type { ActiveSporeState } from './store.js';
 
@@ -67,17 +69,61 @@ export type AppState = {
    * compile time. Security-relevant signals must NOT be silently erased.
    */
   bootWarnings: string[];
+  /**
+   * Phase 2.5 (T38): model string from the most recent `request_started`
+   * stream event. Threaded into <ReasoningBlock model={...}> to render the
+   * routing indicator ("Reasoning (Pro)" / "Reasoning (Flash)" etc.).
+   * Optional for backwards compatibility with existing fixtures that do not
+   * supply the field (treated as undefined → "Reasoning" plain label).
+   */
+  activeModel?: string;
+  /**
+   * Phase 2.5 (T40): token counts from the most recent completed turn.
+   * Populated by the onCostEstimate callback; undefined until the first turn
+   * with non-zero usage completes.
+   */
+  lastTurnUsage?: { inputTokens: number; outputTokens: number };
+  /**
+   * Phase 2.5 (T40): dollar cost of the most recent completed turn (USD).
+   * Zero until the first cost estimate arrives.
+   */
+  lastTurnCost: number;
+  /**
+   * Phase 2.5 (T40): accumulated dollar cost across all turns this session (USD).
+   */
+  sessionTotalCost: number;
+  /**
+   * Phase 2.5 (T40): current subagent step in flight, if any.
+   * Set on `subagent_step` stream events; cleared on `turn_complete`.
+   */
+  subagentStatus?: { step: number; durationMs: number };
 };
 
 export function App({
   state,
   banner,
+  sessionId,
+  cavemanState,
   onApprovalResponse,
   onPromptSubmit,
 }: {
   state: AppState;
   /** Optional splash banner (model + adapter + cwd). Omitted in unit fixtures. */
   banner?: BannerInfo;
+  /**
+   * Phase 2.5 (T40): session UUID rendered in the top banner.
+   * Only the first 8 chars are shown for brevity.
+   * Optional — when absent the top banner is not rendered (unit fixtures).
+   */
+  sessionId?: string;
+  /**
+   * Phase 2.5 (T40): mutable shared reference to caveman state.
+   * Read on every render so the banner reflects the current toggle without
+   * requiring a dedicated state field (the object is mutated by the slash
+   * handler; passing the reference ensures we always see the live value).
+   * Optional — when absent caveman indicator is not rendered.
+   */
+  cavemanState?: CavemanState;
   onApprovalResponse?: (r: ApprovalResponse) => void;
   onPromptSubmit?: (text: string) => void;
 }): React.JSX.Element {
@@ -108,6 +154,26 @@ export function App({
 
   return (
     <Box flexDirection="column" paddingX={1}>
+      {/* Phase 2.5 (T40): static top banner — session id + caveman indicator.
+          Rendered only when sessionId is provided (production path). Unit
+          fixtures omit sessionId so this block is invisible in tests that
+          don't assert on it, keeping fixture setup minimal. */}
+      {sessionId !== undefined && (
+        <Box borderStyle="round" borderColor="gray" paddingX={1} data-testid="session-banner">
+          <Text>
+            {'myceliate-cli | session '}
+            {sessionId.slice(0, 8)}
+            {cavemanState !== undefined && (
+              <Text>
+                {' | '}
+                <Text color={cavemanState.active ? 'yellow' : 'gray'}>
+                  {cavemanState.active ? 'caveman ON' : 'caveman OFF'}
+                </Text>
+              </Text>
+            )}
+          </Text>
+        </Box>
+      )}
       {banner && <Banner {...banner} />}
       {/* Phase 23 Case 8: security-relevant boot warnings (stale spore pin,
           unknown/coordination tools in allowlist). Persistent yellow banner —
@@ -127,16 +193,18 @@ export function App({
           ))}
         </Box>
       )}
-      {state.turns.map((t, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: append-only log, indices are stable.
-        <Box key={i} flexDirection="column" marginBottom={1}>
-          <Box>
-            <Text color="green">{'> '}</Text>
-            <Text>{t.userInput}</Text>
+      {/* History: completed turns rendered via Static for Ink's scroll optimisation. */}
+      <Static items={state.turns}>
+        {(t, i) => (
+          <Box key={i} flexDirection="column" marginBottom={1}>
+            <Box>
+              <Text color="green">{'> '}</Text>
+              <Text>{t.userInput}</Text>
+            </Box>
+            <Text>{t.content}</Text>
           </Box>
-          <Text>{t.content}</Text>
-        </Box>
-      ))}
+        )}
+      </Static>
       {state.phase === 'streaming' && (
         <>
           <Box marginBottom={1}>
@@ -149,6 +217,7 @@ export function App({
               phase={state.reasoning.phase}
               durationMs={(state.reasoning.endedAtMs ?? Date.now()) - state.reasoning.startedAtMs}
               expanded={reasoningExpanded}
+              {...(state.activeModel !== undefined ? { model: state.activeModel } : {})}
             />
           )}
           {state.toolCalls.map((card, i) => (
@@ -177,10 +246,22 @@ export function App({
         if (!head) return null;
         return <ApprovalPrompt request={head} onResponse={onApprovalResponse ?? (() => {})} />;
       })()}
-      {/* Phase 21: InputBox with dynamic border colour replaces PromptInput */}
-      {state.phase === 'awaiting_input' && (
-        <InputBox activeSpore={state.activeSpore} onSubmit={onPromptSubmit ?? (() => {})} />
-      )}
+      {/* Phase 2.5 (T40): bottom footer — TelemetryFooter + InputBox stacked.
+          TelemetryFooter always renders (shows zero-state before first turn).
+          InputBox renders only when awaiting_input. */}
+      <Box flexDirection="column" marginTop={1} data-testid="telemetry-footer-region">
+        <TelemetryFooter
+          lastTurnInputTokens={state.lastTurnUsage?.inputTokens ?? 0}
+          lastTurnOutputTokens={state.lastTurnUsage?.outputTokens ?? 0}
+          lastTurnCostUSD={state.lastTurnCost}
+          sessionTotalCostUSD={state.sessionTotalCost}
+          {...(state.subagentStatus !== undefined ? { subagent: state.subagentStatus } : {})}
+        />
+        {/* Phase 21: InputBox with dynamic border colour replaces PromptInput */}
+        {state.phase === 'awaiting_input' && (
+          <InputBox activeSpore={state.activeSpore} onSubmit={onPromptSubmit ?? (() => {})} />
+        )}
+      </Box>
     </Box>
   );
 }

@@ -5,7 +5,26 @@ import type { SpawnRequest } from '../tools/spawn_subagent.js';
 import { type SpawnResponse, SpawnResponseSchema } from '../tools/spawn_subagent.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const RUNNER_PATH = resolve(HERE, 'subagentRunner.js');
+// Dev/prod detection: when tsx runs the source TypeScript, `import.meta.url`
+// for this module resolves to a `.ts` URL. In a built deployment the same
+// file is loaded as `.js`. We use that to pick the right sibling for the
+// subagent runner (subagentRunner.ts in dev, subagentRunner.js in prod) and
+// to gate the `--import tsx` loader flag on the spawned Node child.
+//
+// The bug this fixes (surfaced by T19 manual smoke 2026-05-15): in dev mode
+// the legacy `resolve(HERE, 'subagentRunner.js')` pointed at a file that
+// never existed (only `.ts` lives in src/). The Node spawn ENOENT'd in
+// ~300ms, the orchestrator's child_process.on('error') handler returned
+// `{ok: false, error: 'spawn failed: ENOENT'}` to the orchestrator, and the
+// orchestrator silently fell back to its own parallel read_file / grep
+// dispatch. Subagents have not actually executed in dev sessions since
+// at least Phase 1, masked entirely by the orchestrator's self-healing
+// ReAct loop. This pattern has been with us all along — T19's literal
+// criterion-1 verification (subagent dispatches log Flash) was the first
+// place it could surface, because every prior verification path treated
+// the orchestrator's recovered response as proof the spawn worked.
+const IS_DEV = import.meta.url.endsWith('.ts');
+const RUNNER_PATH = resolve(HERE, IS_DEV ? 'subagentRunner.ts' : 'subagentRunner.js');
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
 // I1: forward adapter/model/base-URL env vars so the sub-agent can connect
@@ -33,7 +52,15 @@ export async function childProcessSpawn(
       const v = process.env[key];
       if (v !== undefined) env[key] = v;
     }
-    const child = nodeSpawn(execPath, [runnerPath], {
+    // tsx loader is prefixed when the spawned file is a TypeScript source
+    // (dev) so Node can resolve and execute it. The decision is keyed off
+    // the actual file extension, NOT the module-level IS_DEV flag — that
+    // way unit tests (which inject built `.js` fixtures via the runnerPath
+    // DI parameter) skip the loader cleanly. tsx must be resolvable from
+    // the child's cwd; child inherits parent's cwd via Node default, which
+    // in dev points at the project root where node_modules/.bin/tsx lives.
+    const execArgs = runnerPath.endsWith('.ts') ? ['--import', 'tsx', runnerPath] : [runnerPath];
+    const child = nodeSpawn(execPath, execArgs, {
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });

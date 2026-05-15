@@ -4,7 +4,12 @@ import type { ToolCall } from '../adapters/messages.js';
 import { type StreamEvent, isGermination } from '../adapters/streamEvent.js';
 import type { MarkdownStore } from '../memory/markdownStore.js';
 import type { CavemanState } from '../runtime/cavemanMode.js';
-import { type CostBreakdown, calculateCost } from '../runtime/costCalculator.js';
+import {
+  type CostBreakdown,
+  PRICING,
+  calculateCost,
+  toUsageStats,
+} from '../runtime/costCalculator.js';
 import { type SporeRole, roleToModel } from '../runtime/roleToModel.js';
 import { redactSecrets } from '../security/redactor.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -107,11 +112,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
           // that zero-fill the usage block.
           const u = ev.usage;
           if (u.promptTokens > 0 || u.completionTokens > 0) {
-            const usageStats = {
-              inputTokens: u.promptTokens,
-              outputTokens: u.completionTokens,
-              ...(u.cacheHitTokens !== undefined ? { cachedInputTokens: u.cacheHitTokens } : {}),
-            };
+            const usageStats = toUsageStats(u);
             const breakdown = calculateCost(model, usageStats);
             opts.logger?.info({
               event: 'cost_estimated',
@@ -126,6 +127,9 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
               cacheHitCost: breakdown.cacheHitCost,
               totalCost: breakdown.totalCost,
             });
+            if (!(model in PRICING)) {
+              opts.logger?.warn({ event: 'cost_unknown_model', model });
+            }
             opts.onCostEstimate?.(breakdown);
           }
           break;

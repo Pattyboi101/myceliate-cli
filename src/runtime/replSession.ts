@@ -129,13 +129,17 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
     if (prompt === '/caveman' || prompt.startsWith('/caveman ')) {
       if (opts.cavemanState !== undefined) {
         const arg = prompt.slice('/caveman'.length).trim();
+        if (arg !== '' && arg !== 'on' && arg !== 'off') {
+          emitSlash(`caveman: unknown arg "${arg}" — use 'on', 'off', or omit for toggle`);
+          continue;
+        }
         const prevActive = opts.cavemanState.active;
         if (arg === 'on') {
           opts.cavemanState.active = true;
         } else if (arg === 'off') {
           opts.cavemanState.active = false;
         } else {
-          // No arg (or unrecognised arg) → toggle.
+          // No arg → toggle.
           opts.cavemanState.active = !opts.cavemanState.active;
         }
         // logger is optional — use optional chaining so callers that wire

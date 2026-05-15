@@ -1,7 +1,7 @@
 import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { Message } from '../adapters/messages.js';
 import { type CavemanState, applyCavemanPrefix } from '../runtime/cavemanMode.js';
-import { calculateCost } from '../runtime/costCalculator.js';
+import { PRICING, calculateCost, toUsageStats } from '../runtime/costCalculator.js';
 import { roleToModel } from '../runtime/roleToModel.js';
 import { HitlGate } from '../security/hitlGate.js';
 import { grepTool } from '../tools/grep.js';
@@ -109,11 +109,7 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<SubagentL
           // subprocess with no callback path — logger-only (no onCostEstimate).
           const u = event.usage;
           if (u.promptTokens > 0 || u.completionTokens > 0) {
-            const usageStats = {
-              inputTokens: u.promptTokens,
-              outputTokens: u.completionTokens,
-              ...(u.cacheHitTokens !== undefined ? { cachedInputTokens: u.cacheHitTokens } : {}),
-            };
+            const usageStats = toUsageStats(u);
             const breakdown = calculateCost(subagentModel, usageStats);
             logger?.info({
               event: 'cost_estimated',
@@ -128,6 +124,9 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<SubagentL
               cacheHitCost: breakdown.cacheHitCost,
               totalCost: breakdown.totalCost,
             });
+            if (!(subagentModel in PRICING)) {
+              logger?.warn({ event: 'cost_unknown_model', model: subagentModel });
+            }
           }
         }
       }

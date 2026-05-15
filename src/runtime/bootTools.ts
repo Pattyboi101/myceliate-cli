@@ -54,6 +54,13 @@ export interface BootToolsOpts {
    * Optional — when absent, cavemanActive is not included in SpawnRequest.
    */
   cavemanState?: CavemanState;
+  /**
+   * Fix-pass (review): injectable spawn function for unit tests. When provided,
+   * replaces the default `childProcessSpawn` inside the spawn_subagent wrapper
+   * so tests can exercise the re-emission path without forking a real subprocess.
+   * Production callers MUST NOT supply this — omitting it selects the real spawn.
+   */
+  _spawnFnOverride?: Parameters<typeof createSpawnSubagentTool>[0]['spawn'];
 }
 
 export interface BootToolsResult {
@@ -138,11 +145,14 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
     // opts.cavemanState is a mutable reference — reading state.active here (at
     // spawn time, not at bootTools() call time) captures the value the user has
     // set via /caveman up to this moment.
-    spawn: (req) =>
-      childProcessSpawn({
-        ...req,
-        ...(opts.cavemanState !== undefined ? { cavemanActive: opts.cavemanState.active } : {}),
-      }),
+    // _spawnFnOverride is only set by unit tests — production callers omit it.
+    spawn: opts._spawnFnOverride
+      ? opts._spawnFnOverride
+      : (req) =>
+          childProcessSpawn({
+            ...req,
+            ...(opts.cavemanState !== undefined ? { cavemanActive: opts.cavemanState.active } : {}),
+          }),
   });
   // Wrap spawn_subagent to fit ToolRegistry's Tool<Input> interface.
   // Phase 2.5 (T37): after the subagent responds, re-emit each progress entry as a

@@ -34,6 +34,10 @@ export function defaultCavemanState(
 
 export function applyCavemanPrefix(messages: readonly Message[], state: CavemanState): Message[] {
   if (!state.active) return [...messages];
+  // String value-equality is correct: CAVEMAN_SYSTEM_PREFIX is a module-scope
+  // constant, so this detects prior prepends. The only false-positive is a
+  // user whose own system message is verbatim identical to the prefix —
+  // vanishingly unlikely.
   if (messages[0]?.role === 'system' && messages[0]?.content === CAVEMAN_SYSTEM_PREFIX) {
     return [...messages];
   }

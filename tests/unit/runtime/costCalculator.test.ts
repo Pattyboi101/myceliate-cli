@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { PRICING, calculateCost, formatCostUSD } from '../../../src/runtime/costCalculator.js';
+import {
+  PRICING,
+  calculateCost,
+  formatCostUSD,
+  toUsageStats,
+} from '../../../src/runtime/costCalculator.js';
 
 describe('PRICING', () => {
   it('contains all three known models', () => {
@@ -63,6 +68,30 @@ describe('calculateCost', () => {
       outputTokens: 0,
     });
     expect(result.totalCost).toBe(0);
+  });
+});
+
+describe('toUsageStats', () => {
+  it('maps all three fields correctly when cacheHitTokens is defined', () => {
+    const result = toUsageStats({ promptTokens: 100, completionTokens: 50, cacheHitTokens: 20 });
+    expect(result.inputTokens).toBe(100);
+    expect(result.outputTokens).toBe(50);
+    expect(result.cachedInputTokens).toBe(20);
+  });
+
+  it('omits cachedInputTokens when cacheHitTokens is undefined', () => {
+    const result = toUsageStats({ promptTokens: 80, completionTokens: 30 });
+    expect(result.inputTokens).toBe(80);
+    expect(result.outputTokens).toBe(30);
+    expect('cachedInputTokens' in result).toBe(false);
+  });
+
+  it('includes cachedInputTokens: 0 when cacheHitTokens is 0 (zero is not absence)', () => {
+    const result = toUsageStats({ promptTokens: 60, completionTokens: 20, cacheHitTokens: 0 });
+    expect(result.inputTokens).toBe(60);
+    expect(result.outputTokens).toBe(20);
+    expect('cachedInputTokens' in result).toBe(true);
+    expect(result.cachedInputTokens).toBe(0);
   });
 });
 

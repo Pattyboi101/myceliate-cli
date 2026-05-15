@@ -173,6 +173,48 @@ describe('reactLoop cost_estimated emission', () => {
     expect(onCostEstimate).not.toHaveBeenCalled();
   });
 
+  it('emits cost_unknown_model warn and cost_estimated when model is not in PRICING', async () => {
+    const logger = makeLogger();
+    const events: StreamEvent[] = [
+      { type: 'content_delta', text: 'result' },
+      {
+        type: 'done',
+        usage: { promptTokens: 50, completionTokens: 20, reasoningTokens: 0 },
+      },
+    ];
+    const client = recordingClient([events]);
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendUser('go');
+    const tools = new ToolRegistry();
+
+    // Force an unknown model via the model override (env-override pattern).
+    for await (const _ev of runReactLoop({
+      client,
+      engine,
+      tools,
+      model: 'ollama:llama3',
+      // biome-ignore lint/suspicious/noExplicitAny: test mock cast
+      logger: logger as any,
+    })) {
+      // drain
+    }
+
+    // cost_estimated still emitted (with zero totalCost for unknown model)
+    // biome-ignore lint/suspicious/noExplicitAny: test mock cast
+    const infoCalls = (logger.info as any).mock.calls.map((c: any[]) => c[0]);
+    const costEvent = infoCalls.find((c: { event?: string }) => c.event === 'cost_estimated');
+    expect(costEvent).toBeDefined();
+    expect(costEvent.model).toBe('ollama:llama3');
+    expect(costEvent.totalCost).toBe(0);
+
+    // cost_unknown_model warn emitted
+    // biome-ignore lint/suspicious/noExplicitAny: test mock cast
+    const warnCalls = (logger.warn as any).mock.calls.map((c: any[]) => c[0]);
+    const warnEvent = warnCalls.find((c: { event?: string }) => c.event === 'cost_unknown_model');
+    expect(warnEvent).toBeDefined();
+    expect(warnEvent.model).toBe('ollama:llama3');
+  });
+
   it('emits cost_estimated once per iteration in a multi-turn loop', async () => {
     const onCostEstimate = vi.fn();
     const logger = makeLogger();

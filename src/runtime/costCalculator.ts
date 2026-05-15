@@ -62,3 +62,24 @@ export function calculateCost(model: string, usage: UsageStats): CostBreakdown {
 export function formatCostUSD(usd: number, places = 4): string {
   return `$${usd.toFixed(places)}`;
 }
+
+/**
+ * Map the `done.usage` shape (from DeepSeek stream events) to the `UsageStats`
+ * shape expected by `calculateCost`. Extracted to eliminate the duplicated
+ * mapping in reactLoop.ts and subagentLoop.ts (DRY fix-pass).
+ *
+ * `cacheHitTokens` is conditionally spread: when undefined the key is absent
+ * from the result (exactOptionalPropertyTypes safe). When 0 the key IS present
+ * so callers can distinguish "cache-hit field absent" from "zero cache hits".
+ */
+export function toUsageStats(u: {
+  promptTokens: number;
+  completionTokens: number;
+  cacheHitTokens?: number;
+}): UsageStats {
+  return {
+    inputTokens: u.promptTokens,
+    outputTokens: u.completionTokens,
+    ...(u.cacheHitTokens !== undefined ? { cachedInputTokens: u.cacheHitTokens } : {}),
+  };
+}

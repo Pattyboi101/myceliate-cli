@@ -237,6 +237,38 @@ describe('caveman slash command', () => {
     expect(slashOutputs[0]).toBe('caveman ON');
   });
 
+  it('/caveman <unknown_arg> emits usage hint and leaves state unchanged', async () => {
+    const state: CavemanState = { active: false };
+    const logger = makeLogger();
+    const slashOutputs: string[] = [];
+    const { client } = recordingClient();
+
+    const prompts = ['/caveman foo', '/quit'];
+    let pi = 0;
+    await runReplSession({
+      client: client as unknown as DeepSeekClient,
+      tools: stubTools,
+      model: 'mock',
+      cwd: '/tmp',
+      onState: () => {},
+      onTurnComplete: () => {},
+      readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      onSlashOutput: (t) => slashOutputs.push(t),
+      // biome-ignore lint/suspicious/noExplicitAny: test mock cast
+      logger: logger as any,
+      cavemanState: state,
+    });
+
+    // State must NOT have changed.
+    expect(state.active).toBe(false);
+    // Usage hint must be emitted.
+    expect(slashOutputs).toHaveLength(1);
+    expect(slashOutputs[0]).toContain('unknown arg');
+    expect(slashOutputs[0]).toContain('foo');
+    expect(slashOutputs[0]).toContain("'on'");
+    expect(slashOutputs[0]).toContain("'off'");
+  });
+
   it('/caveman does not advance the engine (no stream call made)', async () => {
     const state: CavemanState = { active: false };
     const logger = makeLogger();

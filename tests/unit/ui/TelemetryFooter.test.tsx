@@ -98,7 +98,7 @@ describe('TelemetryFooter', () => {
     );
     const frame = lastFrame() ?? '';
     // ASCII only — no codepoints in emoji blocks.
-    expect(frame.match(/[\u{1F300}-\u{1FAFF}]/u)).toBeNull();
+    expect(frame.match(/[\u{1F000}-\u{1FAFF}]/u)).toBeNull();
     expect(frame.match(/[\u{2600}-\u{27BF}]/u)).toBeNull();
   });
 });

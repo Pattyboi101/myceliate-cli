@@ -82,4 +82,12 @@ describe('ReasoningBlock model indicator', () => {
     );
     expect(lastFrame()).toContain('Reasoning (ollama:llama3)');
   });
+
+  it('renders the model label in the collapsed view', () => {
+    // Collapsed = phase=complete without expanded prop.
+    const { lastFrame } = render(
+      <ReasoningBlock text="..." phase="complete" durationMs={1000} model="deepseek-v4-pro" />,
+    );
+    expect(lastFrame()).toContain('Reasoning (Pro)');
+  });
 });

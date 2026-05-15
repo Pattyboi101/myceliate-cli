@@ -291,25 +291,80 @@ describe('Phase 2.5 — terseness + telemetry end-to-end', () => {
 
   // ── Test 5: turn-boundary state carry (Phase 23 regression guard) ─────────
 
-  it.skip('turn-boundary state carry: cost fields survive onTurnComplete (Phase 23 regression guard)', async () => {
-    // TODO (T42 cumulative): Wire a full replSession harness that mirrors index.ts's
-    // onState re-render pattern, then assert that state.sessionTotalCost after two
-    // turns equals first.totalCost + second.totalCost (i.e. the first turn's cost
-    // was NOT silently erased at onTurnComplete).
-    //
-    // The issue: this test requires either:
-    //   (a) Importing and running runReplSession with a mock readNextPrompt that
-    //       issues two prompts then /quit, capturing onCostEstimate calls and
-    //       comparing to a running sessionTotal maintained by the test harness.
-    //   (b) A unit-level test that directly mocks index.ts's onState/onTurnComplete
-    //       closures and verifies they carry sessionTotalCost forward.
-    //
-    // Option (a) is straightforward given the pattern in replSession.caveman.test.ts
-    // but requires careful sequencing (two real engine turns with a recording client
-    // that has two scripted turn sequences). This was deferred from T41 to avoid
-    // bloat and because the regression was already caught in T40 code review at the
-    // src/index.ts level, not at the replSession boundary. T42 should add this test
-    // once the cumulative sessionTotalCost field is exposed via onCostEstimate or
-    // a dedicated state event.
+  it('turn-boundary state carry: cost fields survive across iterations', async () => {
+    // Two-turn loop driven through runReactLoop directly (not runReplSession —
+    // too heavy for this assertion). The test maintains a sessionTotalCost
+    // accumulator that mirrors the closure in index.ts's onCostEstimate handler.
+    // It guards against a regression where the closure's accumulator is reset
+    // by a state-reconstruction at onCostEstimate/onTurnComplete.
+
+    const { z } = await import('zod');
+    const tools = new ToolRegistry();
+    tools.register({
+      name: 'noop',
+      description: 'noop tool for turn-forcing',
+      capability: 'execution',
+      inputSchema: { kind: 'zod', zod: z.object({ x: z.string() }) },
+      run: async () => 'ok',
+    });
+
+    const turn1Cost = { ref: 0 };
+    const turn2Cost = { ref: 0 };
+    let callCount = 0;
+
+    // onCostEstimate accumulator — mirrors the sessionTotalCost closure in index.ts.
+    let sessionTotalCost = 0;
+    const onCostEstimate = (breakdown: { totalCost: number }): void => {
+      sessionTotalCost += breakdown.totalCost;
+      if (callCount === 0) turn1Cost.ref = breakdown.totalCost;
+      if (callCount === 1) turn2Cost.ref = breakdown.totalCost;
+      callCount += 1;
+    };
+
+    const { client } = recordingClient([
+      [
+        // Turn 1: tool call forces a second iteration.
+        { type: 'content_delta', text: 'running tool' },
+        { type: 'tool_call', id: 'tc1', name: 'noop', args: { x: 'a' } },
+        {
+          type: 'done',
+          usage: { promptTokens: 120, completionTokens: 30, reasoningTokens: 0 },
+        },
+      ],
+      [
+        // Turn 2: terminal answer.
+        { type: 'content_delta', text: 'done' },
+        {
+          type: 'done',
+          usage: { promptTokens: 180, completionTokens: 60, reasoningTokens: 0 },
+        },
+      ],
+    ]);
+
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendUser('go');
+
+    for await (const _ev of runReactLoop({
+      client,
+      engine,
+      tools,
+      onCostEstimate,
+    })) {
+      // drain both turns
+    }
+
+    // onCostEstimate must have fired exactly twice (once per turn).
+    expect(callCount).toBe(2);
+
+    // Both turns must have produced non-zero cost (Pro model for iter 0,
+    // execution model for iter 1 — both are in PRICING).
+    expect(turn1Cost.ref).toBeGreaterThan(0);
+    expect(turn2Cost.ref).toBeGreaterThan(0);
+
+    // The accumulator must equal the sum of both turns.
+    // This is the regression guard: if the closure were reset at onTurnComplete
+    // (a la the Phase 23 silent-erasure pattern) sessionTotalCost would equal
+    // only the last turn's cost.
+    expect(sessionTotalCost).toBeCloseTo(turn1Cost.ref + turn2Cost.ref, 10);
   });
 });

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { StreamEvent, Usage } from '../../../src/adapters/streamEvent.js';
 import {
   isContentDelta,
   isDone,
@@ -24,6 +24,36 @@ describe('StreamEvent', () => {
     expect(events.filter(isDone)).toHaveLength(1);
     expect(events.filter(isError)).toHaveLength(1);
   });
+});
+
+it('done.usage carries the full Usage shape (type-level assertion)', () => {
+  // Compile-time: done variant's usage field is exactly Usage.
+  type DoneEvent = Extract<StreamEvent, { type: 'done' }>;
+  expectTypeOf<DoneEvent['usage']>().toEqualTypeOf<Usage>();
+
+  // Runtime: a fully-populated usage round-trips through isDone.
+  const ev: StreamEvent = {
+    type: 'done',
+    usage: { promptTokens: 100, completionTokens: 50, reasoningTokens: 10, cacheHitTokens: 5 },
+  };
+  expect(isDone(ev)).toBe(true);
+  if (isDone(ev)) {
+    expect(ev.usage.promptTokens).toBe(100);
+    expect(ev.usage.completionTokens).toBe(50);
+    expect(ev.usage.reasoningTokens).toBe(10);
+    expect(ev.usage.cacheHitTokens).toBe(5);
+  }
+});
+
+it('done.usage.cacheHitTokens is optional (omit-able)', () => {
+  // Compile-time: cacheHitTokens is optional — assignability check.
+  const withoutCache: Usage = { promptTokens: 10, completionTokens: 5, reasoningTokens: 0 };
+  expectTypeOf(withoutCache).toMatchTypeOf<Usage>();
+  const ev: StreamEvent = { type: 'done', usage: withoutCache };
+  expect(isDone(ev)).toBe(true);
+  if (isDone(ev)) {
+    expect(ev.usage.cacheHitTokens).toBeUndefined();
+  }
 });
 
 it('isToolResult narrows correctly on completed/failed/rejected', () => {

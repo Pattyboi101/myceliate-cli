@@ -3,6 +3,7 @@ import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { ToolCall } from '../adapters/messages.js';
 import { type StreamEvent, isGermination } from '../adapters/streamEvent.js';
 import type { MarkdownStore } from '../memory/markdownStore.js';
+import { type CostBreakdown, calculateCost } from '../runtime/costCalculator.js';
 import { type SporeRole, roleToModel } from '../runtime/roleToModel.js';
 import { redactSecrets } from '../security/redactor.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -35,6 +36,13 @@ export type ReactLoopOptions = {
    * testable without a logger fixture.
    */
   logger?: Logger;
+  /**
+   * Phase 2.5 cost telemetry: called once per iteration when the `done`
+   * event carries usage stats. Fires AFTER the logger.info call so the
+   * UI can subscribe without parsing the log file. Optional so the loop
+   * remains testable without a cost subscriber.
+   */
+  onCostEstimate?: (breakdown: CostBreakdown) => void;
 };
 
 export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<StreamEvent> {
@@ -78,7 +86,37 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
         case 'tool_call':
           pendingCalls.push({ id: ev.id, name: ev.name, args: ev.args });
           break;
-        case 'done':
+        case 'done': {
+          // Phase 2.5: emit cost telemetry whenever usage is present.
+          // `done.usage` is always populated (zero-filled on upstream omission)
+          // per the DeepSeekClient contract; check that tokens are non-zero so
+          // we don't log a meaningless $0.00 entry on mid-stream error cutoffs
+          // that zero-fill the usage block.
+          const u = ev.usage;
+          if (u.promptTokens > 0 || u.completionTokens > 0) {
+            const usageStats = {
+              inputTokens: u.promptTokens,
+              outputTokens: u.completionTokens,
+              ...(u.cacheHitTokens !== undefined ? { cachedInputTokens: u.cacheHitTokens } : {}),
+            };
+            const breakdown = calculateCost(model, usageStats);
+            opts.logger?.info({
+              event: 'cost_estimated',
+              role,
+              model,
+              iter,
+              inputTokens: u.promptTokens,
+              outputTokens: u.completionTokens,
+              cachedInputTokens: u.cacheHitTokens ?? 0,
+              inputCost: breakdown.inputCost,
+              outputCost: breakdown.outputCost,
+              cacheHitCost: breakdown.cacheHitCost,
+              totalCost: breakdown.totalCost,
+            });
+            opts.onCostEstimate?.(breakdown);
+          }
+          break;
+        }
         case 'error':
         case 'turn_complete':
         case 'tool_result':

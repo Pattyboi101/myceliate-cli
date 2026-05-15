@@ -1,5 +1,6 @@
 import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { Message } from '../adapters/messages.js';
+import { calculateCost } from '../runtime/costCalculator.js';
 import { roleToModel } from '../runtime/roleToModel.js';
 import { HitlGate } from '../security/hitlGate.js';
 import { grepTool } from '../tools/grep.js';
@@ -82,6 +83,32 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
         if (event.type === 'content_delta') assistantText += event.text;
         if (event.type === 'tool_call')
           toolCalls.push({ id: event.id, name: event.name, args: event.args });
+        if (event.type === 'done') {
+          // Phase 2.5: emit cost telemetry per step. Subagent runs in a
+          // subprocess with no callback path — logger-only (no onCostEstimate).
+          const u = event.usage;
+          if (u.promptTokens > 0 || u.completionTokens > 0) {
+            const usageStats = {
+              inputTokens: u.promptTokens,
+              outputTokens: u.completionTokens,
+              ...(u.cacheHitTokens !== undefined ? { cachedInputTokens: u.cacheHitTokens } : {}),
+            };
+            const breakdown = calculateCost(subagentModel, usageStats);
+            logger?.info({
+              event: 'cost_estimated',
+              role: 'subagent',
+              model: subagentModel,
+              step,
+              inputTokens: u.promptTokens,
+              outputTokens: u.completionTokens,
+              cachedInputTokens: u.cacheHitTokens ?? 0,
+              inputCost: breakdown.inputCost,
+              outputCost: breakdown.outputCost,
+              cacheHitCost: breakdown.cacheHitCost,
+              totalCost: breakdown.totalCost,
+            });
+          }
+        }
       }
     }
     messages.push({ role: 'assistant', content: assistantText });

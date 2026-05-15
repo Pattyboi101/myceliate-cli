@@ -7,9 +7,11 @@
 //
 // Has no orchestrator runtime imports — only the adapters + execution-tool registry.
 // Per R8: stateless, ephemeral, communicates via JSON on stdin/stdout.
-import { exit, stdin, stdout } from 'node:process';
+import { join } from 'node:path';
+import { cwd, exit, stdin, stdout } from 'node:process';
 import { z } from 'zod';
 import { createDeepSeekClient } from '../adapters/index.js';
+import { createLogger } from '../util/logger.js';
 import { runSubagentLoop } from './subagentLoop.js';
 
 const RequestSchema = z
@@ -29,6 +31,13 @@ async function readAll(stream: NodeJS.ReadableStream): Promise<string> {
 }
 
 async function main(): Promise<void> {
+  // Subagent inherits the orchestrator's cwd, so writing to `.myceliate/logs`
+  // relative to cwd lands in the same session.log file the orchestrator uses.
+  // POSIX O_APPEND guarantees per-line atomicity for writes <= PIPE_BUF, so
+  // concurrent appends from the orchestrator + subagent process are safe.
+  // Phase 2 closure: required for walk-point 9 to literally verify
+  // "subagent dispatches always log Flash" (criterion 1).
+  const logger = createLogger({ logsDir: join(cwd(), '.myceliate', 'logs') });
   try {
     const raw = await readAll(stdin);
     const req = RequestSchema.parse(JSON.parse(raw));
@@ -38,11 +47,14 @@ async function main(): Promise<void> {
       personaSkill: req.persona_skill,
       task: req.task,
       maxSteps: 20,
+      logger,
     });
+    await logger.flush();
     stdout.write(`${JSON.stringify({ ok: true, summary })}\n`);
     exit(0);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    await logger.flush();
     stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`);
     exit(1);
   }

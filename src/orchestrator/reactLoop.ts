@@ -6,6 +6,7 @@ import type { MarkdownStore } from '../memory/markdownStore.js';
 import { type SporeRole, roleToModel } from '../runtime/roleToModel.js';
 import { redactSecrets } from '../security/redactor.js';
 import type { ToolRegistry } from '../tools/registry.js';
+import type { Logger } from '../util/logger.js';
 import type { QueryEngine } from './QueryEngine.js';
 
 export type ReactLoopOptions = {
@@ -28,6 +29,12 @@ export type ReactLoopOptions = {
    * are stored as artifacts. Default: 4096 (~1k tokens).
    */
   artifactThresholdBytes?: number;
+  /**
+   * Phase 2 closure: per-iteration `request_started` log line for the
+   * routing-pattern smoke (walk-point 9). Optional so the loop remains
+   * testable without a logger fixture.
+   */
+  logger?: Logger;
 };
 
 export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<StreamEvent> {
@@ -43,6 +50,8 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
     const role: SporeRole =
       iter === 0 || opts.engine.hasRetainedReasoning() ? 'repl-with-reasoning' : 'repl-execution';
     const model = opts.model ?? roleToModel(role);
+
+    opts.logger?.info({ event: 'request_started', role, model, iter });
 
     const request = opts.engine.prepareRequest({
       model,

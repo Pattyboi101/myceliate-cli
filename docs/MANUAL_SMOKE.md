@@ -199,7 +199,7 @@ All 6 sections complete with no errors thrown. v1.3 tag candidate.
 
 ## Walk-point 9 — Model routing (Phase 2)
 
-After running any multi-turn orchestrator task, `tail .myceliate/logs/agent.log` should show:
+After running any multi-turn orchestrator task, `tail .myceliate/logs/session.log` should show:
 
 - Subagent dispatches always log `model: 'deepseek-v4-flash'`.
 - Iteration 0 of any orchestrator REPL turn always logs `model: 'deepseek-v4-pro'` (planning bias).
@@ -222,7 +222,7 @@ To verify the env-override warn: `DEEPSEEK_MODEL=test-override myceliate` should
 
 2. `myceliate` → free-form prompt: "open https://example.com and read me the page title."
    Expected: orchestrator emits `germinate_spore('playwright')`, Ink shows germination card,
-   `.myceliate/logs/agent.log` shows MCP server spawn + `initialize` handshake within 5s,
+   `.myceliate/logs/session.log` shows MCP server spawn + `initialize` handshake within 5s,
    `.myceliate/logs/mcp-playwright.log` exists with browser-launch chatter,
    subsequent iterations call `playwright_navigate` then `playwright_snapshot`,
    tool results land in the agent's history, model returns the title.
@@ -254,7 +254,7 @@ To verify the env-override warn: `DEEPSEEK_MODEL=test-override myceliate` should
    `child.on('exit')` listener bridged to `McpLifecycle.onUnexpectedExit`. Tool wrappers
    `playwright_*` deregister automatically. A system-message StreamEvent surfaces in chat:
    "MCP server for 'playwright' terminated; N tool wrapper(s) deregistered."
-   `.myceliate/logs/agent.log` records the exit code/signal.
+   `.myceliate/logs/session.log` records the exit code/signal.
 
 7. Force-kill the orchestrator (Ctrl+C twice).
    Expected: `ps aux | grep -E 'playwright|server-postgres'` shows no surviving

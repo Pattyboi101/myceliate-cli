@@ -67,6 +67,10 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
       iter === 0 || opts.engine.hasRetainedReasoning() ? 'repl-with-reasoning' : 'repl-execution';
     const model = opts.model ?? roleToModel(role);
 
+    // Phase 2.5 (T38): yield request_started as a stream event BEFORE the API
+    // call so the UI can update the routing indicator in ReasoningBlock with the
+    // resolved model. The existing logger.info call is preserved alongside it.
+    yield { type: 'request_started', role, model, iter } satisfies StreamEvent;
     opts.logger?.info({ event: 'request_started', role, model, iter });
 
     const request = opts.engine.prepareRequest({
@@ -131,6 +135,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
         case 'tool_result':
         case 'system_message':
         case 'subagent_step':
+        case 'request_started':
           break;
       }
     }

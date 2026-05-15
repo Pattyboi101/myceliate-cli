@@ -15,6 +15,7 @@ import {
   isError,
   isGermination,
   isReasoningDelta,
+  isRequestStarted,
   isSystemMessage,
   isToolCall,
   isToolResult,
@@ -416,6 +417,10 @@ async function main(): Promise<void> {
           contentText = '';
           reasonStartedAt = Date.now();
           rerender({ ...state, reasoning: null, content: '' });
+        } else if (isRequestStarted(ev)) {
+          // Phase 2.5 (T38): update the active model so ReasoningBlock can
+          // render the routing indicator ("Reasoning (Pro)" / "Reasoning (Flash)").
+          rerender({ ...state, activeModel: ev.model });
         } else if (isError(ev)) {
           logger.error({
             event: 'stream_error',

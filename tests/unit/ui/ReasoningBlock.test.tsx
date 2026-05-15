@@ -32,3 +32,54 @@ describe('ReasoningBlock', () => {
     expect(lastFrame()).toContain('full text here');
   });
 });
+
+describe('ReasoningBlock model indicator', () => {
+  it('renders "Reasoning" when no model prop', () => {
+    const { lastFrame } = render(
+      <ReasoningBlock text="thinking..." phase="complete" durationMs={1000} expanded />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Reasoning');
+    expect(frame).not.toContain('Pro');
+    expect(frame).not.toContain('Flash');
+  });
+
+  it('renders "Reasoning (Pro)" for deepseek-v4-pro', () => {
+    const { lastFrame } = render(
+      <ReasoningBlock
+        text="thinking..."
+        phase="complete"
+        durationMs={1000}
+        expanded
+        model="deepseek-v4-pro"
+      />,
+    );
+    expect(lastFrame()).toContain('Reasoning (Pro)');
+  });
+
+  it('renders "Reasoning (Flash)" for deepseek-v4-flash', () => {
+    const { lastFrame } = render(
+      <ReasoningBlock
+        text="thinking..."
+        phase="complete"
+        durationMs={1000}
+        expanded
+        model="deepseek-v4-flash"
+      />,
+    );
+    expect(lastFrame()).toContain('Reasoning (Flash)');
+  });
+
+  it('renders "Reasoning ({model})" for env-override case', () => {
+    const { lastFrame } = render(
+      <ReasoningBlock
+        text="thinking..."
+        phase="complete"
+        durationMs={1000}
+        expanded
+        model="ollama:llama3"
+      />,
+    );
+    expect(lastFrame()).toContain('Reasoning (ollama:llama3)');
+  });
+});

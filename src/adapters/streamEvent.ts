@@ -82,6 +82,28 @@ export type StreamEvent =
       step: number;
       durationMs: number;
       model: string;
+    }
+  /**
+   * Phase 2.5 (T38): synthetic lifecycle event yielded by `runReactLoop`
+   * immediately before each iteration's API request. Carries the resolved
+   * model string so the UI can update the routing indicator in ReasoningBlock
+   * without polling the logger.
+   *
+   * Subagent-side: `runSubagentLoop` is not a generator function and cannot
+   * yield; the subagent's model is always deterministic Flash so the orchestrator
+   * routing indicator does not need per-step subagent updates. The log event
+   * (`logger?.info({ event: 'request_started', ... })`) still fires in
+   * subagentLoop.ts — only the stream-event yield is omitted there.
+   *
+   * `iter` is the 0-based iteration index within the current ReAct loop.
+   * `step` is reserved for future subagent-side emission (Option a path).
+   */
+  | {
+      type: 'request_started';
+      role: string;
+      model: string;
+      iter?: number;
+      step?: number;
     };
 
 export const isGermination = (e: StreamEvent): e is GerminationEvent =>
@@ -115,5 +137,12 @@ export function isSubagentStep(
 ): ev is { type: 'subagent_step'; step: number; durationMs: number; model: string } {
   return (
     typeof ev === 'object' && ev !== null && (ev as { type?: string }).type === 'subagent_step'
+  );
+}
+export function isRequestStarted(
+  ev: unknown,
+): ev is { type: 'request_started'; role: string; model: string; iter?: number; step?: number } {
+  return (
+    typeof ev === 'object' && ev !== null && (ev as { type?: string }).type === 'request_started'
   );
 }

@@ -5,6 +5,7 @@ import {
   isDone,
   isError,
   isReasoningDelta,
+  isRequestStarted,
   isSubagentStep,
   isToolCall,
   isToolResult,
@@ -79,6 +80,59 @@ describe('isSubagentStep type guard', () => {
     expect(isSubagentStep('string')).toBe(false);
     expect(isSubagentStep(123)).toBe(false);
   });
+});
+
+describe('isRequestStarted type guard', () => {
+  it('returns true for a valid request_started event with all fields', () => {
+    const ev: StreamEvent = {
+      type: 'request_started',
+      role: 'repl-with-reasoning',
+      model: 'deepseek-v4-pro',
+      iter: 0,
+    };
+    expect(isRequestStarted(ev)).toBe(true);
+    if (isRequestStarted(ev)) {
+      expect(ev.role).toBe('repl-with-reasoning');
+      expect(ev.model).toBe('deepseek-v4-pro');
+      expect(ev.iter).toBe(0);
+    }
+  });
+
+  it('returns true when optional iter/step fields are absent', () => {
+    // iter and step are optional — omitting them must still satisfy the guard
+    const ev: StreamEvent = {
+      type: 'request_started',
+      role: 'repl-execution',
+      model: 'deepseek-v4-flash',
+    };
+    expect(isRequestStarted(ev)).toBe(true);
+  });
+
+  it('returns false for other event types', () => {
+    expect(isRequestStarted({ type: 'done' })).toBe(false);
+    expect(isRequestStarted({ type: 'content_delta', text: 'hi' })).toBe(false);
+    expect(isRequestStarted({ type: 'subagent_step', step: 0, durationMs: 0, model: 'x' })).toBe(
+      false,
+    );
+  });
+
+  it('returns false for non-objects and nulls', () => {
+    expect(isRequestStarted(null)).toBe(false);
+    expect(isRequestStarted('string')).toBe(false);
+    expect(isRequestStarted(42)).toBe(false);
+  });
+});
+
+it('request_started variant is part of the StreamEvent union (type-level assertion)', () => {
+  // Compile-time: a correctly shaped object must be assignable to StreamEvent.
+  const ev: StreamEvent = {
+    type: 'request_started',
+    role: 'repl-with-reasoning',
+    model: 'deepseek-v4-pro',
+    iter: 0,
+  };
+  type RequestStartedEvent = Extract<StreamEvent, { type: 'request_started' }>;
+  expectTypeOf(ev).toMatchTypeOf<RequestStartedEvent>();
 });
 
 it('isToolResult narrows correctly on completed/failed/rejected', () => {

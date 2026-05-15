@@ -419,6 +419,90 @@ describe('reactLoop — Anamorph routing dispatch', () => {
   });
 });
 
+describe('reactLoop — request_started stream events (T38)', () => {
+  it('yields request_started before content_delta and done on the first iteration', async () => {
+    vi.stubEnv('DEEPSEEK_MODEL', '');
+    const client = new ScriptedClient([
+      [
+        { type: 'content_delta', text: 'answer' },
+        { type: 'done', usage: { promptTokens: 1, completionTokens: 1, reasoningTokens: 0 } },
+      ],
+    ]);
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendUser('go');
+    const events: StreamEvent[] = [];
+    for await (const ev of runReactLoop({ client, engine, tools: makeTools() })) {
+      events.push(ev);
+    }
+    const types = events.map((e) => e.type);
+    const requestStartedIdx = types.indexOf('request_started');
+    const contentDeltaIdx = types.indexOf('content_delta');
+    const doneIdx = types.indexOf('done');
+    // request_started must appear before the first content_delta and done
+    expect(requestStartedIdx).toBeGreaterThan(-1);
+    expect(requestStartedIdx).toBeLessThan(contentDeltaIdx);
+    expect(requestStartedIdx).toBeLessThan(doneIdx);
+    vi.unstubAllEnvs();
+  });
+
+  it('request_started event carries the correct role, model, and iter fields', async () => {
+    vi.stubEnv('DEEPSEEK_MODEL', '');
+    const client = new ScriptedClient([
+      [
+        { type: 'content_delta', text: 'done' },
+        { type: 'done', usage: { promptTokens: 1, completionTokens: 1, reasoningTokens: 0 } },
+      ],
+    ]);
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendUser('go');
+    const events: StreamEvent[] = [];
+    for await (const ev of runReactLoop({ client, engine, tools: makeTools() })) {
+      events.push(ev);
+    }
+    const requestStarted = events.find((e) => e.type === 'request_started');
+    expect(requestStarted).toBeDefined();
+    if (requestStarted && requestStarted.type === 'request_started') {
+      // iter 0 always dispatches Pro (planning bias)
+      expect(requestStarted.role).toBe('repl-with-reasoning');
+      expect(requestStarted.model).toBe('deepseek-v4-pro');
+      expect(requestStarted.iter).toBe(0);
+    }
+    vi.unstubAllEnvs();
+  });
+
+  it('yields a request_started event per iteration in a multi-turn loop', async () => {
+    vi.stubEnv('DEEPSEEK_MODEL', '');
+    const client = new ScriptedClient([
+      [
+        { type: 'tool_call', id: 't1', name: 'echo', args: { msg: 'x' } },
+        { type: 'done', usage: { promptTokens: 1, completionTokens: 1, reasoningTokens: 0 } },
+      ],
+      [
+        { type: 'content_delta', text: 'done' },
+        { type: 'done', usage: { promptTokens: 2, completionTokens: 2, reasoningTokens: 0 } },
+      ],
+    ]);
+    const engine = new QueryEngine({ systemPrompt: 'sys', workingBudget: 10_000 });
+    engine.appendUser('go');
+    const events: StreamEvent[] = [];
+    for await (const ev of runReactLoop({ client, engine, tools: makeTools() })) {
+      events.push(ev);
+    }
+    const requestStartedEvents = events.filter((e) => e.type === 'request_started');
+    // Two iterations → two request_started events
+    expect(requestStartedEvents).toHaveLength(2);
+    // iter field increments across iterations
+    if (
+      requestStartedEvents[0]?.type === 'request_started' &&
+      requestStartedEvents[1]?.type === 'request_started'
+    ) {
+      expect(requestStartedEvents[0].iter).toBe(0);
+      expect(requestStartedEvents[1].iter).toBe(1);
+    }
+    vi.unstubAllEnvs();
+  });
+});
+
 it('yields tool_result with status=rejected when invoke throws an HITL-rejected error', async () => {
   const tools = makeMockTools({
     bash: async () => {

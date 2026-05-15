@@ -67,6 +67,14 @@ export type AppState = {
    * compile time. Security-relevant signals must NOT be silently erased.
    */
   bootWarnings: string[];
+  /**
+   * Phase 2.5 (T38): model string from the most recent `request_started`
+   * stream event. Threaded into <ReasoningBlock model={...}> to render the
+   * routing indicator ("Reasoning (Pro)" / "Reasoning (Flash)" etc.).
+   * Optional for backwards compatibility with existing fixtures that do not
+   * supply the field (treated as undefined → "Reasoning" plain label).
+   */
+  activeModel?: string;
 };
 
 export function App({
@@ -149,6 +157,7 @@ export function App({
               phase={state.reasoning.phase}
               durationMs={(state.reasoning.endedAtMs ?? Date.now()) - state.reasoning.startedAtMs}
               expanded={reasoningExpanded}
+              {...(state.activeModel !== undefined ? { model: state.activeModel } : {})}
             />
           )}
           {state.toolCalls.map((card, i) => (

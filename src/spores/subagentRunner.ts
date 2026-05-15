@@ -49,7 +49,7 @@ async function main(): Promise<void> {
     // The CavemanState object cannot cross the process boundary directly — only
     // the scalar active flag travels in the SpawnRequest JSON payload (R8).
     const cavemanState: CavemanState = { active: req.cavemanActive ?? false };
-    const summary = await runSubagentLoop({
+    const result = await runSubagentLoop({
       client,
       personaSkill: req.persona_skill,
       task: req.task,
@@ -58,7 +58,9 @@ async function main(): Promise<void> {
       cavemanState,
     });
     await logger.flush();
-    stdout.write(`${JSON.stringify({ ok: true, summary })}\n`);
+    stdout.write(
+      `${JSON.stringify({ ok: true, summary: result.summary, progress: result.progress })}\n`,
+    );
     exit(0);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

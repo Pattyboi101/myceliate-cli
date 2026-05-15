@@ -130,6 +130,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
         case 'turn_complete':
         case 'tool_result':
         case 'system_message':
+        case 'subagent_step':
           break;
       }
     }

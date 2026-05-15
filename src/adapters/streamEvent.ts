@@ -68,7 +68,21 @@ export type StreamEvent =
    * status line. `text` is a human-readable summary including removed wrapper
    * count.
    */
-  | { type: 'system_message'; text: string };
+  | { type: 'system_message'; text: string }
+  /**
+   * Phase 2.5 (T37): synthetic telemetry event emitted by the orchestrator's
+   * spawn_subagent tool wrapper after the subagent subprocess completes.
+   * One event per subagent step, carrying wall-clock duration and the model
+   * used. Consumed by the live telemetry footer (T39/T40).
+   * `step` is 0-indexed; `durationMs` is wall-clock time for that step;
+   * `model` is the subagent model string (e.g. `deepseek-v4-flash`).
+   */
+  | {
+      type: 'subagent_step';
+      step: number;
+      durationMs: number;
+      model: string;
+    };
 
 export const isGermination = (e: StreamEvent): e is GerminationEvent =>
   'type' in e && e.type === 'germination';
@@ -96,3 +110,10 @@ export const isSystemMessage = (
   e: StreamEvent,
 ): e is Extract<StreamEvent, { type: 'system_message' }> =>
   'type' in e && e.type === 'system_message';
+export function isSubagentStep(
+  ev: unknown,
+): ev is { type: 'subagent_step'; step: number; durationMs: number; model: string } {
+  return (
+    typeof ev === 'object' && ev !== null && (ev as { type?: string }).type === 'subagent_step'
+  );
+}

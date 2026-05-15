@@ -66,7 +66,12 @@ export interface SubagentLoopArgs {
   cavemanState?: CavemanState;
 }
 
-export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
+export type SubagentLoopResult = {
+  summary: string;
+  progress: Array<{ step: number; durationMs: number; model: string }>;
+};
+
+export async function runSubagentLoop(args: SubagentLoopArgs): Promise<SubagentLoopResult> {
   const { client, personaSkill, task, maxSteps, logger, cavemanState } = args;
   const registry = buildSubagentRegistry();
   const tools = registry.definitions();
@@ -77,7 +82,9 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
   ];
   let step = 0;
   let final = '';
+  const progress: Array<{ step: number; durationMs: number; model: string }> = [];
   while (step < maxSteps) {
+    const stepStart = Date.now();
     let assistantText = '';
     const toolCalls: Array<{ id: string; name: string; args: unknown }> = [];
     logger?.info({ event: 'request_started', role: 'subagent', model: subagentModel, step });
@@ -125,6 +132,7 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
         }
       }
     }
+    progress.push({ step, durationMs: Date.now() - stepStart, model: subagentModel });
     messages.push({ role: 'assistant', content: assistantText });
     if (toolCalls.length === 0) {
       final = assistantText;
@@ -155,5 +163,5 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
     }
     step += 1;
   }
-  return final || '(no final answer — loop hit max steps)';
+  return { summary: final || '(no final answer — loop hit max steps)', progress };
 }

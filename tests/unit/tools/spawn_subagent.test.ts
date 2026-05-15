@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
+import { isSubagentStep } from '../../../src/adapters/streamEvent.js';
 import { SporeRegistry } from '../../../src/spores/SporeRegistry.js';
 import { createSpawnSubagentTool } from '../../../src/tools/spawn_subagent.js';
 import type { Logger } from '../../../src/util/logger.js';
@@ -116,5 +118,154 @@ describe('spawn_subagent tool', () => {
     if (!result.ok) {
       expect(result.error).toMatch(/crashed/);
     }
+  });
+
+  it('passes progress array through from spawn response to result', async () => {
+    const bundledDir = join(workspace, 'bundled');
+    await mkdir(bundledDir, { recursive: true });
+    await buildFixtureSporeWithPersona(bundledDir, 'demo', 'real');
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
+
+    const progressEntries = [
+      { step: 0, durationMs: 100, model: 'deepseek-v4-flash' },
+      { step: 1, durationMs: 200, model: 'deepseek-v4-flash' },
+    ];
+    const tool = createSpawnSubagentTool({
+      registry,
+      activeSpore: () => 'demo',
+      spawn: async () => ({
+        ok: true,
+        summary: 'all done',
+        progress: progressEntries,
+      }),
+    });
+    const result = await tool.handler({ persona: 'real', task: 'hello' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.progress).toEqual(progressEntries);
+    }
+  });
+
+  it('handles absent progress gracefully (undefined)', async () => {
+    const bundledDir = join(workspace, 'bundled');
+    await mkdir(bundledDir, { recursive: true });
+    await buildFixtureSporeWithPersona(bundledDir, 'demo', 'real');
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
+
+    const tool = createSpawnSubagentTool({
+      registry,
+      activeSpore: () => 'demo',
+      spawn: async () => ({ ok: true, summary: 'done without progress' }),
+    });
+    const result = await tool.handler({ persona: 'real', task: 'hello' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.progress).toBeUndefined();
+    }
+  });
+});
+
+// ─── Orchestrator re-emission via bootTools emit seam ─────────────────────────
+// This verifies that progress entries produce subagent_step events when the
+// bootTools spawn_subagent wrapper calls emit() per entry.
+
+describe('spawn_subagent orchestrator re-emission', () => {
+  it('emits one subagent_step event per progress entry via emit callback', async () => {
+    const bundledDir = join(workspace, 'bundled');
+    await mkdir(bundledDir, { recursive: true });
+    await buildFixtureSporeWithPersona(bundledDir, 'demo', 'real');
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
+
+    const progressEntries = [
+      { step: 0, durationMs: 150, model: 'deepseek-v4-flash' },
+      { step: 1, durationMs: 250, model: 'deepseek-v4-flash' },
+    ];
+    const tool = createSpawnSubagentTool({
+      registry,
+      activeSpore: () => 'demo',
+      spawn: async () => ({
+        ok: true,
+        summary: 'done',
+        progress: progressEntries,
+      }),
+    });
+
+    // Simulate the bootTools emit closure and spawn_subagent wrapper inline.
+    const emitted: StreamEvent[] = [];
+    const emit = (ev: StreamEvent): void => {
+      emitted.push(ev);
+    };
+
+    const result = await tool.handler({ persona: 'real', task: 'hello' });
+    // bootTools wrapper: iterate progress, call emit per entry.
+    if (result.ok) {
+      for (const entry of result.progress ?? []) {
+        emit({
+          type: 'subagent_step',
+          step: entry.step,
+          durationMs: entry.durationMs,
+          model: entry.model,
+        });
+      }
+    }
+
+    const steps = emitted.filter(isSubagentStep);
+    expect(steps).toHaveLength(2);
+    expect(steps[0]).toEqual({
+      type: 'subagent_step',
+      step: 0,
+      durationMs: 150,
+      model: 'deepseek-v4-flash',
+    });
+    expect(steps[1]).toEqual({
+      type: 'subagent_step',
+      step: 1,
+      durationMs: 250,
+      model: 'deepseek-v4-flash',
+    });
+  });
+
+  it('emits no subagent_step events when progress is absent', async () => {
+    const bundledDir = join(workspace, 'bundled');
+    await mkdir(bundledDir, { recursive: true });
+    await buildFixtureSporeWithPersona(bundledDir, 'demo', 'real');
+    const registry = await SporeRegistry.discover(
+      { bundledDir, userDir: '/none', projectDir: '/none' },
+      { logger: noopLogger },
+    );
+
+    const tool = createSpawnSubagentTool({
+      registry,
+      activeSpore: () => 'demo',
+      spawn: async () => ({ ok: true, summary: 'done' }),
+    });
+
+    const emitted: StreamEvent[] = [];
+    const emit = (ev: StreamEvent): void => {
+      emitted.push(ev);
+    };
+
+    const result = await tool.handler({ persona: 'real', task: 'hello' });
+    if (result.ok) {
+      for (const entry of result.progress ?? []) {
+        emit({
+          type: 'subagent_step',
+          step: entry.step,
+          durationMs: entry.durationMs,
+          model: entry.model,
+        });
+      }
+    }
+
+    expect(emitted.filter(isSubagentStep)).toHaveLength(0);
   });
 });

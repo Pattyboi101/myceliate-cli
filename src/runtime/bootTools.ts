@@ -145,6 +145,11 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
       }),
   });
   // Wrap spawn_subagent to fit ToolRegistry's Tool<Input> interface.
+  // Phase 2.5 (T37): after the subagent responds, re-emit each progress entry as a
+  // `subagent_step` stream event into the orchestrator's own stream so the live
+  // telemetry footer (T39/T40) can subscribe without parsing tool_result content.
+  // `emit` is the same closure used by `germinate_spore` and `teardownMcpSpore`
+  // for their synthetic lifecycle events — the same seam, no new infrastructure.
   tools.register({
     name: 'spawn_subagent',
     description: spawnTool.description,
@@ -152,6 +157,16 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
     inputSchema: { kind: 'zod', zod: spawnTool.inputSchema },
     run: async (input, _ctx) => {
       const result = await spawnTool.handler(input);
+      if (result.ok) {
+        for (const entry of result.progress ?? []) {
+          emit({
+            type: 'subagent_step',
+            step: entry.step,
+            durationMs: entry.durationMs,
+            model: entry.model,
+          });
+        }
+      }
       return JSON.stringify(result);
     },
   });

@@ -286,3 +286,24 @@ The orchestrator's `allowed_tools` allowlist in v1.4 scopes only the orchestrato
 > "I can't write files because of my allowlist. Ask the sub-agent to write foo.md instead."
 
 This proxy path succeeds because sub-agents receive the persona's full execution tool set (R9 partition). This is a known, accepted limitation in v1.4. The security boundary is the orchestrator's own direct tool calls. Full allowlist inheritance through `spawn_subagent` is deferred to v1.5, where the sub-agent bootstrap protocol will include the parent's allowlist in the spawn request.
+
+## Walk-point 11 — Terseness + Telemetry (Phase 2.5)
+
+After a fresh `myceliate` boot:
+
+1. Banner shows `myceliate-cli | session <id> | caveman OFF` at the top.
+2. Below the prompt input box, footer shows `last turn: 0 in / 0 out | $0.0000` on the left and `session total: $0.00` on the right.
+3. Issue any prompt that triggers a multi-iter task (e.g. "list the files in src/ and summarize the structure"). After the answer renders:
+   - Footer's `last turn` line updates with non-zero token counts and a per-turn cost in 4-decimal-place USD.
+   - Footer's `session total` increments by the per-turn amount (2-decimal-place USD).
+   - ReasoningBlock header shows `Reasoning (Pro)` for iter-0 and either `Reasoning (Pro)` or `Reasoning (Flash)` for subsequent iters depending on retained-reasoning ratchet.
+   - `session.log` contains one `cost_estimated` event per iter with non-zero totalCost.
+4. Type `/caveman` and press Enter. Slash output reads `caveman ON`. Banner indicator flips to yellow `caveman ON`. Issue another prompt; observe the response is significantly terser. Footer cost should be visibly lower than a comparable pre-caveman turn.
+5. Type `/caveman off`. Banner flips back to gray `caveman OFF`. Verify slash output is `caveman OFF`.
+6. Boot a fresh session with `MYCELIATE_CAVEMAN=1 myceliate`. Confirm banner reads `caveman ON` from the start. `session.log` should contain a single `caveman_toggled` event at boot with `source: 'env-init'`.
+7. Issue a prompt that delegates to a subagent (e.g. "spawn a subagent to grep src/ for SporeRole"). During the subagent's execution:
+   - Footer shows `subagent: step N (Ts)` in cyan while the subagent is running.
+   - After the subagent completes, that line disappears.
+   - `session.log` contains `request_started` events with `role: 'subagent'` and `cost_estimated` events with `role: 'subagent'`.
+
+If everything passes: Phase 2.5 is ready for the cumulative final review.

@@ -5,18 +5,23 @@ import { describe, expect, it } from 'vitest';
 import { App, type AppState } from '../../../src/ui/App.js';
 import type { ToolCallCardState } from '../../../src/ui/ToolCallCard.js';
 
+/** Minimal AppState for tests that only care about a specific behaviour. */
+const baseState: AppState = {
+  userInput: '',
+  reasoning: null,
+  content: '',
+  approvalRequests: [],
+  phase: 'awaiting_input',
+  turns: [],
+  toolCalls: [],
+  activeSpore: null,
+  bootWarnings: [],
+  lastTurnCost: 0,
+  sessionTotalCost: 0,
+};
+
 it('renders <InputBox> when phase is awaiting_input', () => {
-  const state: AppState = {
-    userInput: '',
-    reasoning: null,
-    content: '',
-    approvalRequests: [],
-    phase: 'awaiting_input',
-    turns: [],
-    toolCalls: [],
-    activeSpore: null,
-    bootWarnings: [],
-  };
+  const state: AppState = { ...baseState };
   const { lastFrame } = render(<App state={state} />);
   // InputBox renders the gray block-cursor glyph as its visible marker.
   expect(lastFrame()).toContain('▎');
@@ -24,15 +29,10 @@ it('renders <InputBox> when phase is awaiting_input', () => {
 
 it('hides <InputBox> while streaming', () => {
   const state: AppState = {
+    ...baseState,
     userInput: 'hi',
-    reasoning: null,
     content: 'partial answer',
-    approvalRequests: [],
     phase: 'streaming',
-    turns: [],
-    toolCalls: [],
-    activeSpore: null,
-    bootWarnings: [],
   };
   const { lastFrame } = render(<App state={state} />);
   expect(lastFrame()).not.toContain('▎');
@@ -41,15 +41,11 @@ it('hides <InputBox> while streaming', () => {
 describe('App', () => {
   it('renders the reasoning block above the content stream', () => {
     const state: AppState = {
+      ...baseState,
       userInput: 'do thing',
       reasoning: { text: 'thinking', phase: 'streaming', startedAtMs: Date.now() },
       content: 'partial answer',
-      approvalRequests: [],
       phase: 'streaming',
-      turns: [],
-      toolCalls: [],
-      activeSpore: null,
-      bootWarnings: [],
     };
     const { lastFrame } = render(<App state={state} />);
     const f = lastFrame() ?? '';
@@ -59,17 +55,12 @@ describe('App', () => {
 
   it('shows the approval prompt overlay when approvalRequests has an entry', () => {
     const state: AppState = {
+      ...baseState,
       userInput: 'do thing',
-      reasoning: null,
-      content: '',
       approvalRequests: [
         { kind: 'bash', requestId: 'r1', command: 'rm -rf x', cwd: '/x', reason: 'why' },
       ],
       phase: 'streaming',
-      turns: [],
-      toolCalls: [],
-      activeSpore: null,
-      bootWarnings: [],
     };
     const { lastFrame } = render(<App state={state} />);
     expect(lastFrame()).toContain('Approval required');
@@ -77,19 +68,14 @@ describe('App', () => {
 
   it('toggles reasoning expansion when Tab is pressed', async () => {
     const state: AppState = {
+      ...baseState,
       userInput: 'do thing',
       reasoning: {
         text: 'long internal monologue spanning many words',
         phase: 'complete',
         startedAtMs: Date.now() - 3400,
       },
-      content: '',
-      approvalRequests: [],
       phase: 'streaming',
-      turns: [],
-      toolCalls: [],
-      activeSpore: null,
-      bootWarnings: [],
     };
     const { lastFrame, stdin } = render(<App state={state} />);
     // Wait for Ink's useEffect to register the 'readable' listener via setRawMode.
@@ -114,15 +100,10 @@ describe('App', () => {
     const startedAtMs = Date.now() - 3400; // 3.4 s ago
     const endedAtMs = startedAtMs + 3400; // duration should display as 3.4 s
     const state: AppState = {
+      ...baseState,
       userInput: 'do thing',
       reasoning: { text: 'thinking', phase: 'complete', startedAtMs, endedAtMs },
-      content: '',
-      approvalRequests: [],
       phase: 'streaming',
-      turns: [],
-      toolCalls: [],
-      activeSpore: null,
-      bootWarnings: [],
     };
     const { lastFrame, rerender } = render(<App state={state} />);
     const f1 = lastFrame() ?? '';
@@ -137,18 +118,13 @@ describe('App', () => {
 
   it('renders the head of state.approvalRequests as <ApprovalPrompt> and ignores tail entries', () => {
     const state: AppState = {
+      ...baseState,
       userInput: 'go',
-      reasoning: null,
-      content: '',
       approvalRequests: [
         { kind: 'bash', requestId: 'r1', command: 'rm -rf /tmp/a', cwd: '/', reason: 'rm-rf' },
         { kind: 'bash', requestId: 'r2', command: 'rm -rf /tmp/b', cwd: '/', reason: 'rm-rf' },
       ],
       phase: 'streaming',
-      turns: [],
-      toolCalls: [],
-      activeSpore: null,
-      bootWarnings: [],
     };
     const { lastFrame } = render(<App state={state} />);
     const frame = lastFrame() ?? '';
@@ -169,15 +145,10 @@ it('renders ToolCallCard for each entry in state.toolCalls', () => {
     preview: 'foo.ts',
   };
   const state: AppState = {
+    ...baseState,
     userInput: 'go',
-    reasoning: null,
-    content: '',
-    approvalRequests: [],
     phase: 'streaming',
-    turns: [],
     toolCalls: [toolCall],
-    activeSpore: null,
-    bootWarnings: [],
   };
   const { lastFrame } = render(<App state={state} />);
   expect(lastFrame()).toContain('bash');
@@ -195,16 +166,11 @@ describe('GerminationCard mid-stream collapse', () => {
 
   it('renders the full bordered card while no content has streamed', () => {
     const state: AppState = {
+      ...baseState,
       userInput: 'go',
-      reasoning: null,
-      content: '',
-      approvalRequests: [],
       phase: 'streaming',
-      turns: [],
-      toolCalls: [],
       activeSpore: { name: 'research', accent_color: '#4a90c4' },
       germinationCard: { name: 'research', accent_color: '#4a90c4' },
-      bootWarnings: [],
     };
     const { lastFrame } = render(<App state={state} banner={banner} />);
     const frame = lastFrame() ?? '';
@@ -216,16 +182,12 @@ describe('GerminationCard mid-stream collapse', () => {
 
   it('collapses to one-line summary once content streaming begins', () => {
     const state: AppState = {
+      ...baseState,
       userInput: 'go',
-      reasoning: null,
       content: 'The first chunk of model response...',
-      approvalRequests: [],
       phase: 'streaming',
-      turns: [],
-      toolCalls: [],
       activeSpore: { name: 'research', accent_color: '#4a90c4' },
       germinationCard: { name: 'research', accent_color: '#4a90c4' },
-      bootWarnings: [],
     };
     const { lastFrame } = render(<App state={state} banner={banner} />);
     const frame = lastFrame() ?? '';
@@ -248,16 +210,11 @@ describe('GerminationCard mid-stream collapse', () => {
 
   it('hides the germination card entirely when germinationCard is null', () => {
     const state: AppState = {
+      ...baseState,
       userInput: 'go',
-      reasoning: null,
       content: 'partial',
-      approvalRequests: [],
       phase: 'streaming',
-      turns: [],
-      toolCalls: [],
-      activeSpore: null,
       germinationCard: null,
-      bootWarnings: [],
     };
     const { lastFrame } = render(<App state={state} banner={banner} />);
     const frame = lastFrame() ?? '';
@@ -268,12 +225,9 @@ describe('GerminationCard mid-stream collapse', () => {
 
 it('expands the most recent ToolCallCard when Tab is pressed (after reasoning toggle precedence)', async () => {
   const state: AppState = {
+    ...baseState,
     userInput: 'go',
-    reasoning: null,
-    content: '',
-    approvalRequests: [],
     phase: 'streaming',
-    turns: [],
     toolCalls: [
       {
         id: 't1',
@@ -284,8 +238,6 @@ it('expands the most recent ToolCallCard when Tab is pressed (after reasoning to
         preview: Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n'),
       },
     ],
-    activeSpore: null,
-    bootWarnings: [],
   };
   const { stdin, lastFrame } = render(<App state={state} />);
   await new Promise((r) => setTimeout(r, 50));
@@ -297,4 +249,97 @@ it('expands the most recent ToolCallCard when Tab is pressed (after reasoning to
   // When state.reasoning is null, the Tab handler routes to setCardExpanded
   // and the latest card expands.
   expect(lastFrame()).toContain('line 49');
+});
+
+describe('T40: App layout refactor — static banner + telemetry footer', () => {
+  it('renders the session banner with id and caveman OFF when sessionId and inactive cavemanState are provided', () => {
+    const state: AppState = { ...baseState };
+    const cavemanState = { active: false };
+    const { lastFrame } = render(
+      <App
+        state={state}
+        sessionId="abcdef12-3456-7890-abcd-ef1234567890"
+        cavemanState={cavemanState}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('myceliate-cli');
+    expect(frame).toContain('abcdef12'); // first 8 chars of session id
+    expect(frame).toContain('caveman OFF');
+  });
+
+  it('renders caveman ON indicator in session banner when cavemanState.active is true', () => {
+    const state: AppState = { ...baseState };
+    const cavemanState = { active: true };
+    const { lastFrame } = render(
+      <App
+        state={state}
+        sessionId="aaaabbbb-cccc-dddd-eeee-ffff00001111"
+        cavemanState={cavemanState}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('caveman ON');
+  });
+
+  it('omits the session banner when sessionId is not provided', () => {
+    const state: AppState = { ...baseState };
+    const { lastFrame } = render(<App state={state} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).not.toContain('myceliate-cli | session');
+  });
+
+  it('renders TelemetryFooter with zero-state values when no cost has arrived', () => {
+    const state: AppState = { ...baseState };
+    const { lastFrame } = render(<App state={state} />);
+    const frame = lastFrame() ?? '';
+    // TelemetryFooter shows "last turn:" even with zeros.
+    expect(frame).toContain('last turn:');
+    expect(frame).toContain('session total:');
+  });
+
+  it('renders TelemetryFooter with lastTurnCost and sessionTotalCost when populated', () => {
+    const state: AppState = {
+      ...baseState,
+      lastTurnUsage: { inputTokens: 1200, outputTokens: 300 },
+      lastTurnCost: 0.0014,
+      sessionTotalCost: 0.0028,
+    };
+    const { lastFrame } = render(<App state={state} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('1.2k in');
+    expect(frame).toContain('300 out');
+    expect(frame).toContain('$0.0014');
+    expect(frame).toContain('$0.00'); // session total at 2dp
+  });
+
+  it('renders TelemetryFooter before InputBox in the footer region', () => {
+    const state: AppState = { ...baseState };
+    const { lastFrame } = render(<App state={state} />);
+    const frame = lastFrame() ?? '';
+    const telemetryIdx = frame.indexOf('last turn:');
+    const inputIdx = frame.indexOf('▎');
+    // TelemetryFooter text appears before the InputBox cursor glyph.
+    expect(telemetryIdx).toBeGreaterThanOrEqual(0);
+    expect(inputIdx).toBeGreaterThan(telemetryIdx);
+  });
+
+  it('renders subagent indicator in TelemetryFooter when subagentStatus is set', () => {
+    const state: AppState = {
+      ...baseState,
+      phase: 'streaming',
+      subagentStatus: { step: 2, durationMs: 1500 },
+    };
+    const { lastFrame } = render(<App state={state} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('subagent: step 2');
+    expect(frame).toContain('1.5s');
+  });
+
+  it('does not render subagent indicator when subagentStatus is absent', () => {
+    const state: AppState = { ...baseState, phase: 'streaming' };
+    const { lastFrame } = render(<App state={state} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).not.toContain('subagent: step');
+  });
 });

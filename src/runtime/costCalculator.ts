@@ -16,6 +16,11 @@ export type CostBreakdown = {
   outputCost: number;
   cacheHitCost: number;
   totalCost: number;
+  /** Raw token counts carried alongside the dollar breakdown so consumers
+   * (e.g. TelemetryFooter) can display both without re-deriving from prices. */
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
 };
 
 const PER_MILLION = 1_000_000;
@@ -24,16 +29,34 @@ export function calculateCost(model: string, usage: UsageStats): CostBreakdown {
   const rates = (
     PRICING as Record<string, { inputPerM: number; outputPerM: number; cacheHitPerM: number }>
   )[model];
-  if (!rates) {
-    return { model, inputCost: 0, outputCost: 0, cacheHitCost: 0, totalCost: 0 };
-  }
   const cachedIn = usage.cachedInputTokens ?? 0;
+  if (!rates) {
+    return {
+      model,
+      inputCost: 0,
+      outputCost: 0,
+      cacheHitCost: 0,
+      totalCost: 0,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cachedInputTokens: cachedIn,
+    };
+  }
   const uncachedIn = Math.max(0, usage.inputTokens - cachedIn);
   const inputCost = (uncachedIn * rates.inputPerM) / PER_MILLION;
   const outputCost = (usage.outputTokens * rates.outputPerM) / PER_MILLION;
   const cacheHitCost = (cachedIn * rates.cacheHitPerM) / PER_MILLION;
   const totalCost = inputCost + outputCost + cacheHitCost;
-  return { model, inputCost, outputCost, cacheHitCost, totalCost };
+  return {
+    model,
+    inputCost,
+    outputCost,
+    cacheHitCost,
+    totalCost,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cachedInputTokens: cachedIn,
+  };
 }
 
 export function formatCostUSD(usd: number, places = 4): string {

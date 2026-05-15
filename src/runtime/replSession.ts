@@ -15,6 +15,7 @@ import type { SporeRegistry } from '../spores/SporeRegistry.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { Logger } from '../util/logger.js';
 import type { CavemanState } from './cavemanMode.js';
+import type { CostBreakdown } from './costCalculator.js';
 
 export type ReplSessionOptions = {
   client: DeepSeekClient;
@@ -78,6 +79,13 @@ export type ReplSessionOptions = {
    * Optional — when absent, caveman mode is never applied (inactive by default).
    */
   cavemanState?: CavemanState;
+  /**
+   * Phase 2.5 (T40): called once per iteration when the `done` event carries
+   * usage stats. Fires after the log entry so the UI can display both token
+   * counts and dollar costs without parsing the log file.
+   * Optional — when absent, cost telemetry is not surfaced to the UI.
+   */
+  onCostEstimate?: (breakdown: CostBreakdown) => void;
 };
 
 // Phase 12 review m2 fix: `''` removed from QUIT_TOKENS so an accidental empty
@@ -168,6 +176,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
           ...(opts.model ? { model: opts.model } : {}),
           ...(opts.logger ? { logger: opts.logger } : {}),
           ...(opts.cavemanState !== undefined ? { cavemanState: opts.cavemanState } : {}),
+          ...(opts.onCostEstimate !== undefined ? { onCostEstimate: opts.onCostEstimate } : {}),
           cwd: opts.cwd,
         })) {
           opts.onState(ev);
@@ -237,6 +246,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.logger ? { logger: opts.logger } : {}),
       ...(opts.cavemanState !== undefined ? { cavemanState: opts.cavemanState } : {}),
+      ...(opts.onCostEstimate !== undefined ? { onCostEstimate: opts.onCostEstimate } : {}),
       cwd: opts.cwd,
     })) {
       opts.onState(ev);

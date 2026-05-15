@@ -7,6 +7,7 @@ import { listDirTool } from '../tools/listDir.js';
 import { createReadFileTool } from '../tools/readFile.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { createWriteFileTool } from '../tools/writeFile.js';
+import type { Logger } from '../util/logger.js';
 
 /**
  * v1.5 Cortina: subagents run in subprocesses with no UI for HITL prompts.
@@ -47,12 +48,19 @@ export interface SubagentLoopArgs {
   personaSkill: string;
   task: string;
   maxSteps: number;
+  /**
+   * Phase 2 closure: per-step `request_started` log line so smoke-test
+   * walk-point 9 can literally verify "subagent dispatches always log Flash".
+   * Optional to keep the loop testable without a logger fixture.
+   */
+  logger?: Logger;
 }
 
 export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
-  const { client, personaSkill, task, maxSteps } = args;
+  const { client, personaSkill, task, maxSteps, logger } = args;
   const registry = buildSubagentRegistry();
   const tools = registry.definitions();
+  const subagentModel = roleToModel('subagent');
   const messages: Message[] = [
     { role: 'system', content: personaSkill },
     { role: 'user', content: task },
@@ -62,8 +70,9 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
   while (step < maxSteps) {
     let assistantText = '';
     const toolCalls: Array<{ id: string; name: string; args: unknown }> = [];
+    logger?.info({ event: 'request_started', role: 'subagent', model: subagentModel, step });
     for await (const event of client.stream({
-      model: roleToModel('subagent'),
+      model: subagentModel,
       messages,
       tools,
       thinking: false,

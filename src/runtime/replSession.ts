@@ -125,6 +125,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
           engine,
           tools: opts.tools,
           ...(opts.model ? { model: opts.model } : {}),
+          ...(opts.logger ? { logger: opts.logger } : {}),
           cwd: opts.cwd,
         })) {
           opts.onState(ev);
@@ -192,6 +193,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
       engine,
       tools: opts.tools,
       ...(opts.model ? { model: opts.model } : {}),
+      ...(opts.logger ? { logger: opts.logger } : {}),
       cwd: opts.cwd,
     })) {
       opts.onState(ev);

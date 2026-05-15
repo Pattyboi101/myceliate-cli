@@ -14,6 +14,7 @@ import { ToolRegistry } from '../tools/registry.js';
 import { createSpawnSubagentTool } from '../tools/spawn_subagent.js';
 import { createWriteFileTool } from '../tools/writeFile.js';
 import type { Logger } from '../util/logger.js';
+import type { CavemanState } from './cavemanMode.js';
 import type { McpLifecycle } from './mcpLifecycle.js';
 import type { WorkerHandle } from './workerLifecycle.js';
 
@@ -45,6 +46,14 @@ export interface BootToolsOpts {
    * When absent, teardownMcpSpore is a no-op for the lifecycle.teardown call.
    */
   mcpLifecycle?: McpLifecycle;
+  /**
+   * Phase 2.5: mutable caveman state created at boot. Forwarded into the
+   * spawn_subagent tool wrapper so the subagent subprocess receives the current
+   * active flag via the SpawnRequest JSON payload (scalar boolean crossing the
+   * process boundary per R8).
+   * Optional — when absent, cavemanActive is not included in SpawnRequest.
+   */
+  cavemanState?: CavemanState;
 }
 
 export interface BootToolsResult {
@@ -125,7 +134,15 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
   const spawnTool = createSpawnSubagentTool({
     registry: opts.registry,
     activeSpore: opts.activeSporeRef ?? (() => null),
-    spawn: (req) => childProcessSpawn(req),
+    // Phase 2.5: forward the current caveman active flag into every SpawnRequest.
+    // opts.cavemanState is a mutable reference — reading state.active here (at
+    // spawn time, not at bootTools() call time) captures the value the user has
+    // set via /caveman up to this moment.
+    spawn: (req) =>
+      childProcessSpawn({
+        ...req,
+        ...(opts.cavemanState !== undefined ? { cavemanActive: opts.cavemanState.active } : {}),
+      }),
   });
   // Wrap spawn_subagent to fit ToolRegistry's Tool<Input> interface.
   tools.register({

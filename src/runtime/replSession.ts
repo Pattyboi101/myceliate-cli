@@ -14,6 +14,7 @@ import { runReactLoop } from '../orchestrator/reactLoop.js';
 import type { SporeRegistry } from '../spores/SporeRegistry.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { Logger } from '../util/logger.js';
+import type { CavemanState } from './cavemanMode.js';
 
 export type ReplSessionOptions = {
   client: DeepSeekClient;
@@ -70,6 +71,13 @@ export type ReplSessionOptions = {
    * proceeds without teardown (backwards-compatible with pre-Phase-3 callers).
    */
   teardownMcpSpore?: (sporeName: string) => Promise<void>;
+  /**
+   * Phase 2.5: mutable caveman state created at boot from MYCELIATE_CAVEMAN env.
+   * Passed by reference so the `/caveman` slash handler can mutate state.active
+   * directly and the next prepareRequest call reads the updated value.
+   * Optional — when absent, caveman mode is never applied (inactive by default).
+   */
+  cavemanState?: CavemanState;
 };
 
 // Phase 12 review m2 fix: `''` removed from QUIT_TOKENS so an accidental empty
@@ -106,6 +114,37 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
     if (QUIT_TOKENS.has(prompt)) return;
     if (prompt.length === 0) continue; // Empty submit just re-prompts.
 
+    // Phase 2.5: /caveman slash command — toggle / force on / force off.
+    // Handled BEFORE the namespaced dispatcher so it works regardless of whether
+    // a sporeRegistry is configured (and because it is a simple state mutation,
+    // not a registry lookup).
+    if (prompt === '/caveman' || prompt.startsWith('/caveman ')) {
+      if (opts.cavemanState !== undefined && opts.logger !== undefined) {
+        const arg = prompt.slice('/caveman'.length).trim();
+        const prevActive = opts.cavemanState.active;
+        if (arg === 'on') {
+          opts.cavemanState.active = true;
+        } else if (arg === 'off') {
+          opts.cavemanState.active = false;
+        } else {
+          // No arg (or unrecognised arg) → toggle.
+          opts.cavemanState.active = !opts.cavemanState.active;
+        }
+        opts.logger.info({
+          event: 'caveman_toggled',
+          active: opts.cavemanState.active,
+          source: 'slash',
+        });
+        const status = opts.cavemanState.active ? 'caveman ON' : 'caveman OFF';
+        const noChange = opts.cavemanState.active === prevActive;
+        emitSlash(noChange ? `${status} (no change)` : status);
+      } else {
+        // cavemanState not wired — surface a clear message.
+        emitSlash('caveman: not configured (pass cavemanState to runReplSession)');
+      }
+      continue;
+    }
+
     // Phase 22: namespaced pack command dispatch. Runs BEFORE /spore built-ins.
     if (opts.sporeRegistry && opts.logger) {
       const result = await dispatch(prompt, {
@@ -126,6 +165,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
           tools: opts.tools,
           ...(opts.model ? { model: opts.model } : {}),
           ...(opts.logger ? { logger: opts.logger } : {}),
+          ...(opts.cavemanState !== undefined ? { cavemanState: opts.cavemanState } : {}),
           cwd: opts.cwd,
         })) {
           opts.onState(ev);
@@ -194,6 +234,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
       tools: opts.tools,
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.logger ? { logger: opts.logger } : {}),
+      ...(opts.cavemanState !== undefined ? { cavemanState: opts.cavemanState } : {}),
       cwd: opts.cwd,
     })) {
       opts.onState(ev);

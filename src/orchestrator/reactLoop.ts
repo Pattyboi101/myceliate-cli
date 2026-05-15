@@ -3,6 +3,7 @@ import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { ToolCall } from '../adapters/messages.js';
 import { type StreamEvent, isGermination } from '../adapters/streamEvent.js';
 import type { MarkdownStore } from '../memory/markdownStore.js';
+import type { CavemanState } from '../runtime/cavemanMode.js';
 import { type CostBreakdown, calculateCost } from '../runtime/costCalculator.js';
 import { type SporeRole, roleToModel } from '../runtime/roleToModel.js';
 import { redactSecrets } from '../security/redactor.js';
@@ -43,6 +44,13 @@ export type ReactLoopOptions = {
    * remains testable without a cost subscriber.
    */
   onCostEstimate?: (breakdown: CostBreakdown) => void;
+  /**
+   * Phase 2.5 caveman: mutable shared reference created at boot.
+   * Passed to engine.prepareRequest each turn so the current active state
+   * is read fresh — a `/caveman` slash command that mutates state.active
+   * takes effect on the very next prepareRequest call.
+   */
+  cavemanState?: CavemanState;
 };
 
 export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<StreamEvent> {
@@ -67,6 +75,7 @@ export async function* runReactLoop(opts: ReactLoopOptions): AsyncIterable<Strea
       thinking: true,
       strict: true,
       ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.cavemanState !== undefined ? { cavemanState: opts.cavemanState } : {}),
     });
 
     let assistantContent = '';

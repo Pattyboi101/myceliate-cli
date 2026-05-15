@@ -19,6 +19,8 @@ export interface SpawnRequest {
   persona_name: string;
   persona_skill: string;
   task: string;
+  /** Phase 2.5: forward caveman active state across process boundary. */
+  cavemanActive?: boolean;
 }
 
 export const SpawnResponseSchema = z.discriminatedUnion('ok', [

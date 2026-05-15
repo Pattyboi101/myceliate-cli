@@ -2,6 +2,7 @@
 import type { ChatRequest, ToolDefinition } from '../adapters/DeepSeekClient.js';
 import type { AssistantMessage, Message, ToolResult } from '../adapters/messages.js';
 import { hasReasoningContent, hasToolCalls } from '../adapters/messages.js';
+import { type CavemanState, applyCavemanPrefix } from '../runtime/cavemanMode.js';
 import { BudgetChecker, type BudgetThresholds } from './compaction/budgetChecker.js';
 import { microCompact } from './compaction/microCompactor.js';
 import { snipDeadEnds } from './compaction/snipper.js';
@@ -135,6 +136,8 @@ export class QueryEngine {
     strict: boolean;
     signal?: AbortSignal;
     options?: Readonly<Record<string, unknown>>;
+    /** Phase 2.5: when provided and active, prepends the caveman system prefix. */
+    cavemanState?: CavemanState;
   }): ChatRequest {
     let working: Message[] = [...this.history];
     const verdict = this.checker.check(working);
@@ -164,7 +167,13 @@ export class QueryEngine {
     }
 
     const system: Message = { role: 'system', content: this.systemSections.join('') };
-    const messages: Message[] = [system, ...this.applyR2(working)];
+    const assembled: Message[] = [system, ...this.applyR2(working)];
+    // Phase 2.5: apply caveman prefix after system-prompt assembly so the
+    // caveman directive always appears BEFORE the project system prompt.
+    const messages =
+      args.cavemanState !== undefined
+        ? applyCavemanPrefix(assembled, args.cavemanState)
+        : assembled;
     return {
       model: args.model,
       messages,

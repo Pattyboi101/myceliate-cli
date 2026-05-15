@@ -32,6 +32,7 @@ import { buildSystemPrompt, senseContext } from './orchestrator/context.js';
 import { getRedis } from './queue/connection.js';
 import { bashQueue } from './queue/queues.js';
 import { bootTools } from './runtime/bootTools.js';
+import { defaultCavemanState } from './runtime/cavemanMode.js';
 import { McpLifecycle } from './runtime/mcpLifecycle.js';
 import { runReplSession } from './runtime/replSession.js';
 import { buildTurnsFromHistory, isSafeToResume } from './runtime/resume.js';
@@ -63,6 +64,17 @@ async function main(): Promise<void> {
   const sessionId = resumeId ?? randomUUID();
   const logger = createLogger({ logsDir: join(ctx.memoryDir, 'logs') });
   checkAndWarnEnvOverride(logger);
+
+  // Phase 2.5: create mutable caveman state from env at boot.
+  // The same object is passed by reference through to replSession → reactLoop →
+  // QueryEngine.prepareRequest so a /caveman slash command's mutation takes
+  // effect on the very next API request without restarting the session.
+  const cavemanState = defaultCavemanState(process.env);
+  logger.info({
+    event: 'caveman_toggled',
+    active: cavemanState.active,
+    source: 'env-init',
+  });
 
   const onboarding = await runOnboarding({
     ...(process.env.DEEPSEEK_API_KEY ? { apiKey: process.env.DEEPSEEK_API_KEY } : {}),
@@ -226,6 +238,7 @@ async function main(): Promise<void> {
     registry: spores.registry,
     cwd,
     logger,
+    cavemanState,
     emit: (ev) => {
       if (isGermination(ev)) {
         uiActiveSpore = { name: ev.spore, accent_color: ev.accent_color };
@@ -300,6 +313,7 @@ async function main(): Promise<void> {
       logger,
       getActiveSpore: () => activeSpore,
       teardownMcpSpore,
+      cavemanState,
       onSlashOutput: (text) => {
         // Phase 21: render slash command output as a completed turn (no streaming).
         const newTurn: CompletedTurn = { userInput: '', content: text };

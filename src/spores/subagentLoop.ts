@@ -1,5 +1,6 @@
 import type { DeepSeekClient } from '../adapters/DeepSeekClient.js';
 import type { Message } from '../adapters/messages.js';
+import { type CavemanState, applyCavemanPrefix } from '../runtime/cavemanMode.js';
 import { calculateCost } from '../runtime/costCalculator.js';
 import { roleToModel } from '../runtime/roleToModel.js';
 import { HitlGate } from '../security/hitlGate.js';
@@ -55,10 +56,18 @@ export interface SubagentLoopArgs {
    * Optional to keep the loop testable without a logger fixture.
    */
   logger?: Logger;
+  /**
+   * Phase 2.5: mutable caveman state forwarded from the orchestrator via
+   * the SpawnRequest JSON payload (scalar active flag reconstructed into
+   * a local CavemanState object in subagentRunner.ts).
+   * When active, applyCavemanPrefix is called before each stream invocation.
+   * Optional — when absent, caveman mode is never applied.
+   */
+  cavemanState?: CavemanState;
 }
 
 export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
-  const { client, personaSkill, task, maxSteps, logger } = args;
+  const { client, personaSkill, task, maxSteps, logger, cavemanState } = args;
   const registry = buildSubagentRegistry();
   const tools = registry.definitions();
   const subagentModel = roleToModel('subagent');
@@ -72,9 +81,14 @@ export async function runSubagentLoop(args: SubagentLoopArgs): Promise<string> {
     let assistantText = '';
     const toolCalls: Array<{ id: string; name: string; args: unknown }> = [];
     logger?.info({ event: 'request_started', role: 'subagent', model: subagentModel, step });
+    // Phase 2.5: apply caveman prefix before each stream call so the directive
+    // is always the first message seen by the model on this step. applyCavemanPrefix
+    // is a pure function that returns a new array — it does not mutate messages.
+    const stepMessages =
+      cavemanState !== undefined ? applyCavemanPrefix(messages, cavemanState) : messages;
     for await (const event of client.stream({
       model: subagentModel,
-      messages,
+      messages: stepMessages,
       tools,
       thinking: false,
       strict: true,

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { cwd, exit, stdin, stdout } from 'node:process';
 import { z } from 'zod';
 import { createDeepSeekClient } from '../adapters/index.js';
+import type { CavemanState } from '../runtime/cavemanMode.js';
 import { createLogger } from '../util/logger.js';
 import { runSubagentLoop } from './subagentLoop.js';
 
@@ -19,6 +20,8 @@ const RequestSchema = z
     persona_name: z.string(),
     persona_skill: z.string(),
     task: z.string(),
+    /** Phase 2.5: caveman active flag forwarded from orchestrator. */
+    cavemanActive: z.boolean().optional(),
   })
   .strict();
 
@@ -42,12 +45,17 @@ async function main(): Promise<void> {
     const raw = await readAll(stdin);
     const req = RequestSchema.parse(JSON.parse(raw));
     const client = createDeepSeekClient();
+    // Phase 2.5: reconstruct local CavemanState from the forwarded boolean.
+    // The CavemanState object cannot cross the process boundary directly — only
+    // the scalar active flag travels in the SpawnRequest JSON payload (R8).
+    const cavemanState: CavemanState = { active: req.cavemanActive ?? false };
     const summary = await runSubagentLoop({
       client,
       personaSkill: req.persona_skill,
       task: req.task,
       maxSteps: 20,
       logger,
+      cavemanState,
     });
     await logger.flush();
     stdout.write(`${JSON.stringify({ ok: true, summary })}\n`);

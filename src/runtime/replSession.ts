@@ -119,7 +119,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
     // a sporeRegistry is configured (and because it is a simple state mutation,
     // not a registry lookup).
     if (prompt === '/caveman' || prompt.startsWith('/caveman ')) {
-      if (opts.cavemanState !== undefined && opts.logger !== undefined) {
+      if (opts.cavemanState !== undefined) {
         const arg = prompt.slice('/caveman'.length).trim();
         const prevActive = opts.cavemanState.active;
         if (arg === 'on') {
@@ -130,7 +130,9 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
           // No arg (or unrecognised arg) → toggle.
           opts.cavemanState.active = !opts.cavemanState.active;
         }
-        opts.logger.info({
+        // logger is optional — use optional chaining so callers that wire
+        // cavemanState but omit logger still get the state mutation + emitSlash.
+        opts.logger?.info({
           event: 'caveman_toggled',
           active: opts.cavemanState.active,
           source: 'slash',

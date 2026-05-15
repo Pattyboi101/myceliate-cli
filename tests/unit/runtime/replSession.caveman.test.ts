@@ -209,6 +209,34 @@ describe('caveman slash command', () => {
     expect(slashOutputs[0]).toBe('caveman OFF (no change)');
   });
 
+  it('/caveman toggles state when logger is absent', async () => {
+    // Regression: guard was `cavemanState !== undefined && logger !== undefined`.
+    // A caller with cavemanState but no logger silently fell into the
+    // 'not configured' branch. This test locks the fix in place.
+    const state: CavemanState = { active: false };
+    const slashOutputs: string[] = [];
+    const { client } = recordingClient();
+
+    const prompts = ['/caveman', '/quit'];
+    let pi = 0;
+    await runReplSession({
+      client: client as unknown as DeepSeekClient,
+      tools: stubTools,
+      model: 'mock',
+      cwd: '/tmp',
+      onState: () => {},
+      onTurnComplete: () => {},
+      readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      onSlashOutput: (t) => slashOutputs.push(t),
+      // logger deliberately omitted — cavemanState must still work.
+      cavemanState: state,
+    });
+
+    expect(state.active).toBe(true);
+    expect(slashOutputs).toHaveLength(1);
+    expect(slashOutputs[0]).toBe('caveman ON');
+  });
+
   it('/caveman does not advance the engine (no stream call made)', async () => {
     const state: CavemanState = { active: false };
     const logger = makeLogger();

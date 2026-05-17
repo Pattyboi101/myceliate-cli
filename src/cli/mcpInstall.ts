@@ -85,7 +85,7 @@ export async function runMcpInstall(opts: McpInstallOpts): Promise<void> {
       env,
       logger,
       serverName: name,
-      initializeTimeoutMs: Number(process.env.MCP_INITIALIZE_TIMEOUT_MS) || 5000,
+      initializeTimeoutMs: Number(process.env.MCP_INITIALIZE_TIMEOUT_MS) || 30000,
     });
 
     await client.initialize();

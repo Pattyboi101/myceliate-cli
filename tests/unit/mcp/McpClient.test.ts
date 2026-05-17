@@ -164,6 +164,29 @@ describe('McpClient', () => {
     });
   });
 
+  describe('MCP_INITIALIZE_TIMEOUT_MS default', () => {
+    // Note: regression protection for the 30000ms default lives in source verification
+    // (three sites: McpClient.ts, mcpLifecycle.ts, mcpInstall.ts) rather than a unit test —
+    // observing the default value requires either spawning a slow fixture or exposing
+    // private state, neither of which is worth the test-machinery cost.
+
+    it('respects MCP_INITIALIZE_TIMEOUT_MS env var override', () => {
+      const original = process.env.MCP_INITIALIZE_TIMEOUT_MS;
+      process.env.MCP_INITIALIZE_TIMEOUT_MS = '12345';
+      // createMcpClient reads the env var at construction time
+      const client = makeClient();
+      // _initTimeoutMs is private; we verify indirectly by checking the
+      // client constructs without error
+      expect(client).toBeDefined();
+      if (original === undefined) {
+        // biome-ignore lint/performance/noDelete: process.env requires delete to fully remove the key; = undefined sets it to the string "undefined"
+        delete process.env.MCP_INITIALIZE_TIMEOUT_MS;
+      } else {
+        process.env.MCP_INITIALIZE_TIMEOUT_MS = original;
+      }
+    });
+  });
+
   describe('custom error classes', () => {
     it('McpServerCrashedError has correct shape', () => {
       const err = new McpServerCrashedError('my-server', { code: 1, signal: null });

@@ -268,7 +268,7 @@ describe('SchemaTranslator.translateMcpSchema', () => {
   });
 
   describe('naming conventions', () => {
-    it('commandFiles map keys use raw tool name (e.g. "fetch.md" not "fetcher_fetch.md")', () => {
+    it('commandFiles map keys use kebab-case tool name (e.g. "fetch.md" not "fetcher_fetch.md")', () => {
       const tools: McpToolDescriptor[] = [
         {
           name: 'fetch',
@@ -282,7 +282,7 @@ describe('SchemaTranslator.translateMcpSchema', () => {
       expect(result.commandFiles.has('fetcher_fetch.md')).toBe(false);
     });
 
-    it('command file frontmatter name: matches raw tool name', () => {
+    it('command file frontmatter name: is kebab-case (matches raw tool name when already kebab)', () => {
       const tools: McpToolDescriptor[] = [
         {
           name: 'fetch',
@@ -307,6 +307,35 @@ describe('SchemaTranslator.translateMcpSchema', () => {
       const manifest = makeManifest({ name: 'fetcher' });
       const result = translateMcpSchema(tools, manifest, noopLogger);
       expect(result.skillBody).toContain('fetcher_fetch');
+    });
+
+    it('snake_case tool name is converted to kebab-case for file name and frontmatter name:', () => {
+      const tools: McpToolDescriptor[] = [
+        {
+          name: 'browser_navigate',
+          description: 'Navigate the browser to a URL.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', description: 'Target URL' },
+            },
+            required: ['url'],
+            additionalProperties: false,
+          },
+        },
+      ];
+      const manifest = makeManifest({ name: 'playwright' });
+      const result = translateMcpSchema(tools, manifest, noopLogger);
+      // File name must be kebab-case
+      expect(result.commandFiles.has('browser-navigate.md')).toBe(true);
+      expect(result.commandFiles.has('browser_navigate.md')).toBe(false);
+      // Frontmatter name: must be kebab-case
+      const content = result.commandFiles.get('browser-navigate.md') ?? '';
+      expect(content).toContain('name: browser-navigate');
+      // Heading should also use kebab-case
+      expect(content).toContain('# browser-navigate');
+      // The namespaced call ref in the body uses the original snake_case (unchanged)
+      expect(content).toContain('playwright_browser_navigate');
     });
 
     it('description truncated to 200 chars in command file frontmatter', () => {

@@ -222,7 +222,11 @@ describe('allowed_tools × dynamic MCP registration ordering', () => {
     expect(activeNames).toContain('spawn_subagent');
   });
 
-  it('setActiveSpore before germination — allowlist_unknown_tool fires, wrapper absent', async () => {
+  it('setActiveSpore before germination — MCP-namespaced tools deferred (no warning, stays in allowlist)', async () => {
+    // H3 fix: MCP tools register lazily on germinate_spore, not at pin time.
+    // Calling setActiveSpore BEFORE germination must NOT emit allowlist_unknown_tool
+    // for <sporeName>_* entries — they are deferred into the allowlist so that
+    // when germinate runs and registers them, the allowlist already permits them.
     const warnCalls: Array<Record<string, unknown>> = [];
     const logger = noopLikeLogger(warnCalls);
 
@@ -245,14 +249,15 @@ describe('allowed_tools × dynamic MCP registration ordering', () => {
     // Activate allowlist BEFORE any germination (no MCP wrappers registered yet).
     setActiveSpore('fake-nav');
 
-    // The namespaced tool is unknown at this point → warning fires.
+    // H3: the namespaced tool is deferred — NO warning fires.
     const unknownWarnings = warnCalls.filter((e) => e.event === 'allowlist_unknown_tool');
-    expect(unknownWarnings.length).toBeGreaterThan(0);
-    expect(unknownWarnings.some((e) => e.tool === 'fake-nav_navigate')).toBe(true);
+    expect(unknownWarnings).toHaveLength(0);
 
-    // The tool is not visible through the active allowlist.
+    // The tool wrapper isn't registered yet (germinate hasn't run), so
+    // getActiveTools() won't return it — but the allowlist entry is retained
+    // internally. The key assertion is absence of the drop warning above.
     const activeNames = tools.getActiveTools().map((t) => t.name);
-    expect(activeNames).not.toContain('fake-nav_navigate');
+    expect(activeNames).not.toContain('fake-nav_navigate'); // not registered yet — that's fine
   });
 
   it('regression: hand-authored spore with allowed_tools: [bash] works unchanged', async () => {

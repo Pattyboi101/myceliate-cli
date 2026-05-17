@@ -253,6 +253,18 @@ async function main(): Promise<void> {
 
   // Phase 23: bootTools extracts the tool registration block from index.ts and
   // adds setActiveSpore for allowlist management (Phase 23 Task 3).
+  //
+  // H4: separate boot-time warnings from pin-time warnings so the UI banner
+  // reflects ONLY the current active spore's validation state, not all
+  // historical pin operations.
+  //
+  // bootTimeWarnings: warnings emitted during the boot-time setActiveSpore call
+  // (i.e., re-activating a previously pinned spore from disk at startup).
+  // Captured once after boot; immutable for the session.
+  //
+  // bootWarnings: the live AppState array = [...bootTimeWarnings, ...pinTimeWarnings].
+  // Replaced (not appended to) on each /spore pin or /spore unpin so old warnings
+  // from previous pins don't accumulate in the banner.
   let bootWarnings: string[] = [];
   const { tools, setActiveSpore, teardownMcpSpore } = bootTools({
     hitl,
@@ -302,6 +314,12 @@ async function main(): Promise<void> {
     setActiveSpore(spores.activeSpore);
   }
 
+  // H4: capture boot-time warnings AFTER the boot-time setActiveSpore call.
+  // These are warnings from re-activating a previously pinned spore at startup
+  // (e.g., stale pin file references a spore that no longer exists). They are
+  // session-persistent and re-applied as the base for every subsequent pin reset.
+  const bootTimeWarnings: string[] = [...bootWarnings];
+
   // Per-turn streaming buffers (reset on each `turn_complete` and at the top of
   // every REPL iteration via the runReplSession `onState` callback below).
   let reasonStartedAt = Date.now();
@@ -338,7 +356,7 @@ async function main(): Promise<void> {
       getActiveSpore: () => activeSpore,
       teardownMcpSpore,
       cavemanState,
-      onSlashOutput: (text) => {
+      onSlashOutput: (text, input) => {
         // Phase 21: render slash command output as a completed turn (no streaming).
         // Phase 2.5 fix (2026-05-16): the prompt-resolve .then in readNextPrompt sets
         // phase: 'streaming' before the slash dispatcher runs (line 523), so on slash
@@ -346,7 +364,10 @@ async function main(): Promise<void> {
         // (it mounts only when phase === 'awaiting_input'). Walk-point 11 step 4
         // surfaced this: after `/caveman`, the chat bar disappeared. Fix: full state
         // reconstruction matching onTurnComplete's pattern, with phase reset.
-        const newTurn: CompletedTurn = { userInput: '', content: text };
+        // H5 (2026-05-17): use the original slash command as userInput so the chat
+        // history reads as a conversation ("  > /caveman" / "caveman ON") rather
+        // than disconnected output fragments with no visible trigger.
+        const newTurn: CompletedTurn = { userInput: input, content: text };
         rerender({
           userInput: '',
           reasoning: null,
@@ -366,6 +387,14 @@ async function main(): Promise<void> {
       onActiveSporeChange: (name) => {
         // Phase 21: /spore pin or /spore unpin changed the active spore.
         // Phase 23: also update the registry allowlist via setActiveSpore.
+        //
+        // H4: reset bootWarnings to the boot-time base BEFORE calling
+        // setActiveSpore so that onUserVisibleWarning only accumulates
+        // warnings for THIS pin, not all previous ones. Without this reset
+        // the banner accumulates stale warnings from prior pin attempts
+        // (e.g., /spore pin foo → 23 warnings → /spore pin bar → 23 more
+        // appended = 46 total, most referring to the now-inactive foo spore).
+        bootWarnings = [...bootTimeWarnings];
         if (name === null) {
           uiActiveSpore = null;
           activeSpore = null;
@@ -384,7 +413,7 @@ async function main(): Promise<void> {
         // Clear any visible germination card on slash-driven spore changes —
         // the card is for tool-call germination events; manual /spore pin/unpin
         // bypasses that path and shouldn't leave a stale card on screen.
-        rerender({ ...state, activeSpore: uiActiveSpore, germinationCard: null });
+        rerender({ ...state, activeSpore: uiActiveSpore, germinationCard: null, bootWarnings });
       },
       onState: (ev: StreamEvent) => {
         if (isReasoningDelta(ev)) {

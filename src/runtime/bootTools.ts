@@ -207,6 +207,12 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
       ...tools.byCapability('execution').map((t) => t.name),
       ...tools.byCapability('coordination').map((t) => t.name),
     ]);
+    // H3: MCP spores declare tools that register LAZILY on germinate_spore, not
+    // at pin time. Any tool matching <sporeName>_* is deferred — kept in the
+    // allowlist as-is without a warn, so that when germinate registers them the
+    // allowlist already permits them. Non-matching tools keep strict validation.
+    const isMcpSpore = spore.manifest.mcp_server !== undefined;
+    const mcpNamespacePrefix = `${name}_`;
     for (const candidate of allowed) {
       if (coordNames.has(candidate)) {
         opts.logger.warn({
@@ -220,6 +226,11 @@ export function bootTools(opts: BootToolsOpts): BootToolsResult {
         continue;
       }
       if (!knownNames.has(candidate)) {
+        // Defer validation for MCP-namespaced tools — they register on germinate.
+        if (isMcpSpore && candidate.startsWith(mcpNamespacePrefix)) {
+          filtered.push(candidate);
+          continue;
+        }
         opts.logger.warn({ event: 'allowlist_unknown_tool', spore: name, tool: candidate });
         opts.onUserVisibleWarning?.(
           `Spore "${name}" lists unknown tool "${candidate}" in allowed_tools — entry dropped.`,

@@ -7,8 +7,11 @@
 // Snapshot-testable: fixed input → fixed output.
 //
 // Naming convention (per §5.4):
-//   - commandFiles map key (and frontmatter `name:`) uses the RAW MCP tool name.
-//   - SKILL.md body capability references use the NAMESPACED form: <spore-name>_<raw-name>.
+//   - commandFiles map key (and frontmatter `name:`) uses the KEBAB-CASE form of the MCP tool
+//     name. snake_case names (e.g. browser_navigate) are converted with `_` → `-` so the
+//     command-loader's kebab-case validator accepts them.
+//   - SKILL.md body capability references use the NAMESPACED form: <spore-name>_<raw-name>,
+//     retaining the original MCP tool name for tool registry dispatch.
 //   - The frontmatter `name:` field matches the filename basename, satisfying the
 //     existing parseSkillFrontmatter validation.
 
@@ -86,12 +89,18 @@ export function translateMcpSchema(
 
   const commandFiles = new Map<string, string>();
   for (const tool of tools) {
-    const fileName = `${tool.name}.md`;
-    const content = buildCommandFile(tool, sporeName, sensitiveTools);
+    const kebabName = toKebab(tool.name);
+    const fileName = `${kebabName}.md`;
+    const content = buildCommandFile(tool, kebabName, sporeName, sensitiveTools);
     commandFiles.set(fileName, content);
   }
 
   return { skillBody, commandFiles };
+}
+
+/** Convert snake_case (or any underscore-separated) name to kebab-case. */
+function toKebab(name: string): string {
+  return name.replace(/_/g, '-').toLowerCase();
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -144,11 +153,13 @@ function buildArgHierarchy(inputSchema: Record<string, unknown>, depth: number):
 
 /**
  * Build a single command/*.md file content.
- * Frontmatter name: raw tool name (matches filename, passes parseSkillFrontmatter validation).
- * Body call reference uses namespaced form.
+ * Frontmatter name: kebab-case tool name (matches filename, passes parseSkillFrontmatter validation).
+ * Body call reference (namespacedName) retains the raw tool name so the tool registry mapping
+ * to the MCP server's actual call signature is preserved.
  */
 function buildCommandFile(
   tool: McpToolDescriptor,
+  kebabName: string,
   sporeName: string,
   sensitiveTools: Set<string>,
 ): string {
@@ -164,8 +175,8 @@ function buildCommandFile(
   // Prose summary — capitalise + ensure period.
   const proseSummary = summariseTool(tool.description);
 
-  const frontmatter = `---\nname: ${tool.name}\ndescription: ${fmDesc}\n---\n`;
-  const heading = `# ${tool.name}\n`;
+  const frontmatter = `---\nname: ${kebabName}\ndescription: ${fmDesc}\n---\n`;
+  const heading = `# ${kebabName}\n`;
   const intro = `Invoked as \`${namespacedName}\`. ${proseSummary}\n`;
   const sensitiveNotice = isSensitive
     ? '\n**Sensitive:** this tool requires human approval before each call.\n'

@@ -46,7 +46,7 @@ export type ReplSessionOptions = {
    * NEVER falls back to console.log because U4 forbids stdout writes while
    * Ink is mounted (ANSI corruption). Production callers always provide it.
    */
-  onSlashOutput?: (text: string) => void;
+  onSlashOutput?: (text: string, input: string) => void;
   /**
    * Phase 21: fires when /spore pin or /spore unpin changes the active spore.
    * Consumer re-renders the InputBox border colour.
@@ -115,7 +115,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
 
   // Silent no-op fallback — see ReplSessionOptions.onSlashOutput JSDoc for
   // the U4 reasoning. Production paths always provide a real handler.
-  const emitSlash = opts.onSlashOutput ?? ((_t: string) => {});
+  const emitSlash = opts.onSlashOutput ?? ((_t: string, _i: string) => {});
 
   while (true) {
     const prompt = (await opts.readNextPrompt()).trim();
@@ -130,7 +130,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
       if (opts.cavemanState !== undefined) {
         const arg = prompt.slice('/caveman'.length).trim();
         if (arg !== '' && arg !== 'on' && arg !== 'off') {
-          emitSlash(`caveman: unknown arg "${arg}" — use 'on', 'off', or omit for toggle`);
+          emitSlash(`caveman: unknown arg "${arg}" — use 'on', 'off', or omit for toggle`, prompt);
           continue;
         }
         const prevActive = opts.cavemanState.active;
@@ -151,10 +151,10 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
         });
         const status = opts.cavemanState.active ? 'caveman ON' : 'caveman OFF';
         const noChange = opts.cavemanState.active === prevActive;
-        emitSlash(noChange ? `${status} (no change)` : status);
+        emitSlash(noChange ? `${status} (no change)` : status, prompt);
       } else {
         // cavemanState not wired — surface a clear message.
-        emitSlash('caveman: not configured (pass cavemanState to runReplSession)');
+        emitSlash('caveman: not configured (pass cavemanState to runReplSession)', prompt);
       }
       continue;
     }
@@ -189,7 +189,7 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
         continue;
       }
       if (result.kind === 'orchestrator-output') {
-        emitSlash(result.text);
+        emitSlash(result.text, prompt);
         continue;
       }
       // result.kind === 'no-match' — fall through to the existing /spore block.
@@ -200,24 +200,24 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
       const parts = prompt.slice(6).trim().split(/\s+/);
       const sub = parts[0] ?? '';
       if (sub === 'list' || sub === '') {
-        emitSlash(await handleSporeList({ registry: opts.sporeRegistry }));
+        emitSlash(await handleSporeList({ registry: opts.sporeRegistry }), prompt);
         continue;
       }
       if (sub === 'pin') {
         const name = parts[1] ?? '';
         if (!name) {
-          emitSlash('Usage: /spore pin <name>');
+          emitSlash('Usage: /spore pin <name>', prompt);
           continue;
         }
         const result = await handleSporePin({ registry: opts.sporeRegistry, cwd: opts.cwd, name });
-        emitSlash(result.message);
+        emitSlash(result.message, prompt);
         if (result.ok) opts.onActiveSporeChange?.(name);
         continue;
       }
       if (sub === 'unpin') {
         const previouslyActive = opts.getActiveSpore?.() ?? null;
         const result = await handleSporeUnpin({ cwd: opts.cwd });
-        emitSlash(result.message);
+        emitSlash(result.message, prompt);
         if (result.ok) {
           if (previouslyActive !== null) {
             await opts.teardownMcpSpore?.(previouslyActive);
@@ -233,11 +233,13 @@ export async function runReplSession(opts: ReplSessionOptions): Promise<void> {
             tools: opts.tools,
             activeSpore: opts.getActiveSpore?.() ?? null,
           }),
+          prompt,
         );
         continue;
       }
       emitSlash(
         `Unknown /spore subcommand: ${sub}. Try: /spore list | /spore pin <name> | /spore unpin | /spore tools`,
+        prompt,
       );
       continue;
     }

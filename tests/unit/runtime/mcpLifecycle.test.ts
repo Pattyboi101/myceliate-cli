@@ -229,6 +229,25 @@ describe('McpLifecycle', () => {
       const expectedLog = join(TEST_LOGS_DIR, 'mcp-playwright.log');
       expect(existsSync(expectedLog)).toBe(true);
     }, 10_000);
+
+    it('MCP server stderr is piped to mcp-<spore>.log (non-empty after server writes to stderr)', async () => {
+      // This test verifies H6: child process stderr must land in the log file.
+      // The fake server writes FAKE_STDERR_MSG to stderr on startup.
+      // After spawn() and a short settle, the log file must contain that string.
+      const { readFileSync } = await import('node:fs');
+
+      const knownMsg = 'FAKE_STDERR_HELLO_H6';
+      const spore = makeSpore('stderr-spore', { FAKE_STDERR_MSG: knownMsg });
+
+      await lifecycle.spawn(spore as never);
+
+      // Give the PassThrough → WriteStream pipeline a moment to flush.
+      await new Promise<void>((r) => setTimeout(r, 200));
+
+      const logPath = join(TEST_LOGS_DIR, 'mcp-stderr-spore.log');
+      const contents = readFileSync(logPath, 'utf8');
+      expect(contents).toContain(knownMsg);
+    }, 10_000);
   });
 
   // ─── onUnexpectedExit bridge ─────────────────────────────────────────────────

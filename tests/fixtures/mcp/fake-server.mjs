@@ -10,6 +10,8 @@
  *                               (reproduces the stdio-hygiene corruption scenario)
  *   FAKE_EXIT_AFTER_TOOL_CALL=1 — respond to tools/call normally, then immediately exit(1)
  *                               via setImmediate (simulates unexpected crash mid-session)
+ *   FAKE_STDERR_MSG           — if set, write this string to stderr on process start
+ *                               (used by H6 tests to verify stderr → mcp-<spore>.log routing)
  */
 
 import * as readline from 'node:readline';
@@ -19,6 +21,12 @@ const callDelayMs = Number(process.env.FAKE_CALL_DELAY_MS ?? 0);
 const trapSigterm = process.env.FAKE_TRAP_SIGTERM === '1';
 const debugToStdout = process.env.FAKE_DEBUG_TO_STDOUT === '1';
 const exitAfterToolCall = process.env.FAKE_EXIT_AFTER_TOOL_CALL === '1';
+const fakeStderrMsg = process.env.FAKE_STDERR_MSG ?? '';
+
+// Write diagnostic line to stderr on startup if requested (H6 pipe-routing tests).
+if (fakeStderrMsg) {
+  process.stderr.write(`${fakeStderrMsg}\n`);
+}
 
 if (trapSigterm) {
   process.on('SIGTERM', () => {

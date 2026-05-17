@@ -404,3 +404,56 @@ describe('caveman prefix in stream requests', () => {
     expect(req?.messages[0]?.role).toBe('system');
   });
 });
+
+// ─── H5: onSlashOutput passes original input as second arg ───────────────────
+
+describe('onSlashOutput input threading (H5)', () => {
+  it('/caveman passes the original slash command as the second arg to onSlashOutput', async () => {
+    const state: CavemanState = { active: false };
+    const { client } = recordingClient();
+    const calls: Array<{ text: string; input: string }> = [];
+
+    const prompts = ['/caveman', '/quit'];
+    let pi = 0;
+    await runReplSession({
+      client: client as unknown as DeepSeekClient,
+      tools: stubTools,
+      model: 'mock',
+      cwd: '/tmp',
+      onState: () => {},
+      onTurnComplete: () => {},
+      readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      onSlashOutput: (text, input) => calls.push({ text, input }),
+      cavemanState: state,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.text).toBe('caveman ON');
+    expect(calls[0]?.input).toBe('/caveman');
+  });
+
+  it('/caveman on passes the full slash command as the second arg', async () => {
+    // Start active=true so '/caveman on' is a no-change; output is 'caveman ON (no change)'.
+    const state: CavemanState = { active: true };
+    const { client } = recordingClient();
+    const calls: Array<{ text: string; input: string }> = [];
+
+    const prompts = ['/caveman on', '/quit'];
+    let pi = 0;
+    await runReplSession({
+      client: client as unknown as DeepSeekClient,
+      tools: stubTools,
+      model: 'mock',
+      cwd: '/tmp',
+      onState: () => {},
+      onTurnComplete: () => {},
+      readNextPrompt: async () => prompts[pi++] ?? '/quit',
+      onSlashOutput: (text, input) => calls.push({ text, input }),
+      cavemanState: state,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.text).toBe('caveman ON (no change)');
+    expect(calls[0]?.input).toBe('/caveman on');
+  });
+});

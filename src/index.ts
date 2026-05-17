@@ -356,7 +356,7 @@ async function main(): Promise<void> {
       getActiveSpore: () => activeSpore,
       teardownMcpSpore,
       cavemanState,
-      onSlashOutput: (text) => {
+      onSlashOutput: (text, input) => {
         // Phase 21: render slash command output as a completed turn (no streaming).
         // Phase 2.5 fix (2026-05-16): the prompt-resolve .then in readNextPrompt sets
         // phase: 'streaming' before the slash dispatcher runs (line 523), so on slash
@@ -364,7 +364,10 @@ async function main(): Promise<void> {
         // (it mounts only when phase === 'awaiting_input'). Walk-point 11 step 4
         // surfaced this: after `/caveman`, the chat bar disappeared. Fix: full state
         // reconstruction matching onTurnComplete's pattern, with phase reset.
-        const newTurn: CompletedTurn = { userInput: '', content: text };
+        // H5 (2026-05-17): use the original slash command as userInput so the chat
+        // history reads as a conversation ("  > /caveman" / "caveman ON") rather
+        // than disconnected output fragments with no visible trigger.
+        const newTurn: CompletedTurn = { userInput: input, content: text };
         rerender({
           userInput: '',
           reasoning: null,

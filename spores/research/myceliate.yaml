@@ -1,0 +1,24 @@
+name: research
+description: |
+  Sector pack for academic research. Personas for literature review,
+  methods design, data extraction, academic writing, citation hygiene,
+  and peer review.
+version: 1.0.0
+accent_color: "#5fb8b8"
+keywords:
+  - research
+  - academic
+  - thesis
+  - literature
+  - dissertation
+agents:
+  - lit-reviewer
+  - methodologist
+  - data-extractor
+  - writer
+  - citation-manager
+  - peer-reviewer
+allowed_tools:
+  - read_file
+  - grep
+  - list_dir

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "fetch",
+    "description": "Fetch a URL and return its body content.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string", "description": "URL to fetch" }
+      },
+      "required": ["url"],
+      "additionalProperties": false
+    }
+  }
+]

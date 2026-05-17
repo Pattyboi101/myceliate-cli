@@ -1,0 +1,12 @@
+name: meta
+description: |
+  Meta-spore for Myceliate itself. Used to author new sector packs.
+version: 1.0.0
+accent_color: "#9d6bc4"
+keywords:
+  - meta
+  - spore
+  - authoring
+  - new-spore
+agents:
+  - spore-creator

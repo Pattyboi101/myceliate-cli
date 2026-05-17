@@ -1,0 +1,18 @@
+name: coding
+description: |
+  Sector pack for software engineering work. Composable persona roster
+  for architecture, review, refactoring, testing, debugging, security.
+version: 1.0.0
+accent_color: "#5fb87c"
+keywords:
+  - coding
+  - engineering
+  - software
+  - development
+agents:
+  - architect
+  - code-reviewer
+  - refactorer
+  - test-writer
+  - debugger
+  - security

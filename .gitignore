@@ -14,5 +14,6 @@ coverage/
 .vscode/
 .idea/
 
-# Research source documents (kept outside the package)
-../*.docx
+# Research source documents (Gemini deep-research artifacts kept locally, never published)
+docs/*.docx
+docs/*.txt

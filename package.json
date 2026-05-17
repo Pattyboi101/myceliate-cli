@@ -2,23 +2,25 @@
   "name": "myceliate-cli",
   "version": "0.1.0",
   "description": "Autonomous DeepSeek V4 CLI agent. Thin Agent / Fat Platform architecture.",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Pattyboi101/myceliate-cli.git"
+  },
   "type": "module",
   "bin": {
-    "myc": "dist/index.js"
+    "myceliate": "bin/myceliate.mjs"
   },
   "main": "dist/index.js",
-  "files": [
-    "dist",
-    "README.md",
-    "CLAUDE.md"
-  ],
+  "files": ["bin", "dist", "spores", "src", "README.md", "CLAUDE.md"],
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --dir tests/integration",
+    "test:integration": "vitest run tests/integration",
     "lint": "biome check .",
     "format": "biome format --write .",
     "queue:worker": "tsx src/queue/worker.ts",
@@ -30,10 +32,13 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.7.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "bullmq": "^5.13.0",
+    "dotenv": "^17.4.2",
     "ink": "^5.0.1",
     "ioredis": "^5.4.1",
     "react": "^18.3.1",
+    "yaml": "^2.8.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -43,6 +48,6 @@
     "ink-testing-library": "^4.0.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
-    "vitest": "^2.1.1"
+    "vitest": "^2.1.9"
   }
 }

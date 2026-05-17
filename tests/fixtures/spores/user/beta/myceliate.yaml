@@ -1,0 +1,6 @@
+name: beta
+description: User beta.
+version: 1.0.0
+accent_color: "#333333"
+agents:
+  - z

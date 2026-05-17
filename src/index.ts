@@ -340,8 +340,28 @@ async function main(): Promise<void> {
       cavemanState,
       onSlashOutput: (text) => {
         // Phase 21: render slash command output as a completed turn (no streaming).
+        // Phase 2.5 fix (2026-05-16): the prompt-resolve .then in readNextPrompt sets
+        // phase: 'streaming' before the slash dispatcher runs (line 523), so on slash
+        // completion the phase is still 'streaming' and the InputBox does NOT remount
+        // (it mounts only when phase === 'awaiting_input'). Walk-point 11 step 4
+        // surfaced this: after `/caveman`, the chat bar disappeared. Fix: full state
+        // reconstruction matching onTurnComplete's pattern, with phase reset.
         const newTurn: CompletedTurn = { userInput: '', content: text };
-        rerender({ ...state, turns: [...state.turns, newTurn] });
+        rerender({
+          userInput: '',
+          reasoning: null,
+          content: '',
+          approvalRequests: [],
+          phase: 'awaiting_input',
+          turns: [...state.turns, newTurn],
+          toolCalls: [],
+          activeSpore: uiActiveSpore,
+          germinationCard: null,
+          bootWarnings,
+          lastTurnCost: state.lastTurnCost,
+          sessionTotalCost: state.sessionTotalCost,
+          ...(state.lastTurnUsage !== undefined ? { lastTurnUsage: state.lastTurnUsage } : {}),
+        });
       },
       onActiveSporeChange: (name) => {
         // Phase 21: /spore pin or /spore unpin changed the active spore.

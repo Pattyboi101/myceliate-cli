@@ -41,6 +41,33 @@ function mkSpore(name: string, allowedTools: string[] | undefined): Spore {
   };
 }
 
+function mkMcpSpore(name: string, allowedTools: string[]): Spore {
+  return {
+    name,
+    tier: 'user',
+    dir: `/fake/${name}`,
+    manifest: {
+      name,
+      description: 'desc',
+      version: '1.0.0',
+      accent_color: '#000000',
+      keywords: [],
+      agents: [],
+      allowed_tools: allowedTools,
+      mcp_server: {
+        command: 'npx',
+        args: [`@${name}/mcp@latest`],
+        env: {},
+        sensitive_tools: [],
+      },
+    },
+    sectorFrontmatter: { name, description: 'desc' },
+    sectorSkillPath: `/fake/${name}/SKILL.md`,
+    personas: [],
+    commands: [],
+  };
+}
+
 // ─── McpLifecycle mock factory ────────────────────────────────────────────────
 
 /**
@@ -333,6 +360,89 @@ describe('bootTools', () => {
 
     const sysMsg = emitted.find((e) => e.type === 'system_message');
     expect(sysMsg).toBeDefined();
+  });
+
+  // ─── H3: MCP-spore deferred allowlist validation ─────────────────────────────
+
+  it('setActiveSpore on an MCP spore does NOT emit allowlist_unknown_tool for <sporeName>_* tools', () => {
+    // MCP tools register lazily on germinate_spore, not at pin time.
+    // The validator must defer validation for the spore's own namespace so
+    // 23 (or N) Playwright tools don't produce 23 [!] warnings per pin.
+    const events: Array<Record<string, unknown>> = [];
+    const logger: Logger = { ...noopLogger, warn: (e) => events.push(e) };
+    const visibleWarnings: string[] = [];
+
+    const allowedTools = [
+      'playwright_browser_navigate',
+      'playwright_browser_click',
+      'playwright_browser_fill',
+      'read_file', // native tool — should still be validated + kept
+    ];
+    const registry = SporeRegistry.fromList([mkMcpSpore('playwright', allowedTools)]);
+    const result = bootTools({
+      hitl: fakeHitl,
+      registry,
+      logger,
+      onUserVisibleWarning: (msg) => visibleWarnings.push(msg),
+    });
+
+    result.setActiveSpore('playwright');
+
+    // No allowlist_unknown_tool events for playwright_* tools.
+    const unknownToolEvents = events.filter((e) => e.event === 'allowlist_unknown_tool');
+    expect(unknownToolEvents).toHaveLength(0);
+
+    // No user-visible warnings for playwright_* tools either.
+    const playwrightWarnings = visibleWarnings.filter((m) => m.includes('playwright_'));
+    expect(playwrightWarnings).toHaveLength(0);
+
+    // The MCP-namespaced tools remain in the active allowlist (not dropped).
+    const activeNames = result.tools.getActiveTools().map((t) => t.name);
+    expect(activeNames).toContain('read_file');
+    // playwright_* tools are in the allowlist even though they are not yet registered
+    // in the registry — germinate_spore will register them later.
+    // We verify via the underlying allowlist state: getActiveTools only returns
+    // registered tools, so we cannot assert playwright_* appear there yet.
+    // The key assertion is ABSENCE of drop warnings above — the entries were NOT dropped.
+  });
+
+  it('setActiveSpore on an MCP spore still warns for non-namespaced unknown native tools', () => {
+    // native tools like "totally_fake_tool" (not matching <sporeName>_) must still
+    // be validated strictly even for MCP spores.
+    const events: Array<Record<string, unknown>> = [];
+    const logger: Logger = { ...noopLogger, warn: (e) => events.push(e) };
+
+    const allowedTools = [
+      'playwright_browser_navigate', // MCP-namespaced — deferred, no warning
+      'read_file', // native, known — kept
+      'totally_fake_native_tool', // native, unknown — must still warn
+    ];
+    const registry = SporeRegistry.fromList([mkMcpSpore('playwright', allowedTools)]);
+    const result = bootTools({ hitl: fakeHitl, registry, logger });
+
+    result.setActiveSpore('playwright');
+
+    // allowlist_unknown_tool fires for the non-namespaced fake tool only.
+    const unknownToolEvents = events.filter((e) => e.event === 'allowlist_unknown_tool');
+    expect(unknownToolEvents).toHaveLength(1);
+    expect(unknownToolEvents[0]?.tool).toBe('totally_fake_native_tool');
+
+    // No warning for the MCP-namespaced tool.
+    expect(unknownToolEvents.some((e) => e.tool === 'playwright_browser_navigate')).toBe(false);
+  });
+
+  it('non-MCP spore with unknown tools STILL warns (regression guard)', () => {
+    // Ensure the MCP-spore skip does not bleed into native spores.
+    const events: Array<Record<string, unknown>> = [];
+    const logger: Logger = { ...noopLogger, warn: (e) => events.push(e) };
+
+    const registry = SporeRegistry.fromList([mkSpore('native', ['read_file', 'does_not_exist'])]);
+    const result = bootTools({ hitl: fakeHitl, registry, logger });
+    result.setActiveSpore('native');
+
+    const unknownToolEvents = events.filter((e) => e.event === 'allowlist_unknown_tool');
+    expect(unknownToolEvents).toHaveLength(1);
+    expect(unknownToolEvents[0]?.tool).toBe('does_not_exist');
   });
 
   it('existing bootTools tests remain compatible with new mcpLifecycle opt (no regression)', () => {

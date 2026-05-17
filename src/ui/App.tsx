@@ -174,7 +174,14 @@ export function App({
           </Text>
         </Box>
       )}
-      {banner && <Banner {...banner} />}
+      {/* Boot banner (durdraw ASCII art) wrapped in <Static>: this content is
+          committed to stdout ONCE at first mount and never re-rendered. Without
+          this wrap, every App state change (caveman toggle, cost_estimated event,
+          subagent_step event, any rerender) caused Ink to re-emit the 26-line
+          banner art, accumulating in terminal scrollback and pushing the dynamic
+          region (active turn + telemetry footer + InputBox) off-screen. T40
+          surfaced this via walk-point 11 step 4 manual smoke. */}
+      <Static items={banner ? [banner] : []}>{(b, i) => <Banner key={i} {...b} />}</Static>
       {/* Phase 23 Case 8: security-relevant boot warnings (stale spore pin,
           unknown/coordination tools in allowlist). Persistent yellow banner —
           these are not transient progress messages, they signal a security

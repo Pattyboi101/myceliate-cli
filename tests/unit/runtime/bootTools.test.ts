@@ -459,4 +459,108 @@ describe('bootTools', () => {
     expect(visible).toEqual(['germinate_spore', 'grep', 'read_file', 'spawn_subagent']);
     expect(typeof result.teardownMcpSpore).toBe('function');
   });
+
+  // ─── H4: bootWarnings reset on each pin — no historical accumulation ─────────
+
+  it('H4: consecutive setActiveSpore calls each emit their own warnings independently', () => {
+    // setActiveSpore emits warnings PER CALL. Each call emits only the warnings
+    // that apply to THAT pin. The caller (index.ts onActiveSporeChange) is
+    // responsible for resetting the accumulator before each pin so the UI banner
+    // only shows warnings for the CURRENT active spore, not all historical pins.
+    //
+    // This test verifies that two sequential setActiveSpore calls produce
+    // exactly N1 warnings for call-1 and N2 warnings for call-2 — not N1+N2
+    // cumulatively — when the caller resets between calls (the correct pattern).
+    const registry = SporeRegistry.fromList([
+      mkSpore('foo', ['read_file', 'foo_unknown_tool']), // 1 unknown tool warning
+      mkSpore('bar', ['grep', 'bar_unknown_tool_a', 'bar_unknown_tool_b']), // 2 unknown tool warnings
+    ]);
+
+    // Simulate the index.ts onUserVisibleWarning / onActiveSporeChange pattern.
+    // bootTimeWarnings = warnings emitted before the first pin (captured once at boot).
+    const bootTimeWarnings: string[] = [];
+    let currentBootWarnings: string[] = [...bootTimeWarnings];
+
+    const result = bootTools({
+      hitl: fakeHitl,
+      registry,
+      logger: noopLogger,
+      onUserVisibleWarning: (msg) => {
+        // This callback appends to currentBootWarnings exactly as index.ts does.
+        currentBootWarnings = [...currentBootWarnings, msg];
+      },
+    });
+
+    // Pin foo: reset to bootTimeWarnings + accumulate foo's warnings.
+    currentBootWarnings = [...bootTimeWarnings];
+    result.setActiveSpore('foo');
+    const warningsAfterFooPin = [...currentBootWarnings];
+
+    // Pin bar: reset to bootTimeWarnings + accumulate bar's warnings.
+    currentBootWarnings = [...bootTimeWarnings];
+    result.setActiveSpore('bar');
+    const warningsAfterBarPin = [...currentBootWarnings];
+
+    // foo pin should have produced exactly 1 warning (for foo_unknown_tool).
+    expect(warningsAfterFooPin).toHaveLength(1);
+    expect(warningsAfterFooPin[0]).toContain('foo_unknown_tool');
+
+    // bar pin should have produced exactly 2 warnings — NOT 3 (1 foo + 2 bar).
+    expect(warningsAfterBarPin).toHaveLength(2);
+    expect(warningsAfterBarPin.some((m) => m.includes('bar_unknown_tool_a'))).toBe(true);
+    expect(warningsAfterBarPin.some((m) => m.includes('bar_unknown_tool_b'))).toBe(true);
+    // Crucially: foo's warning must NOT appear after the bar pin.
+    expect(warningsAfterBarPin.some((m) => m.includes('foo_unknown_tool'))).toBe(false);
+  });
+
+  it('H4: boot-time-only warnings persist across pin/unpin cycles', () => {
+    // Warnings emitted during the initial boot-time setActiveSpore (from prior
+    // pin file) are "boot-time warnings". They should persist in the banner across
+    // all subsequent pin/unpin cycles, not be wiped.
+    //
+    // index.ts captures bootTimeWarnings AFTER the boot-time setActiveSpore call,
+    // then uses that as the base for every subsequent pin reset.
+    const registry = SporeRegistry.fromList([
+      // Boot-time spore not found → 1 stale-pin warning at boot.
+      mkSpore('secondary', ['grep']), // a valid spore with no warnings
+    ]);
+
+    const bootTimeWarnings: string[] = [];
+    let currentBootWarnings: string[] = [];
+
+    const result = bootTools({
+      hitl: fakeHitl,
+      registry,
+      logger: noopLogger,
+      onUserVisibleWarning: (msg) => {
+        currentBootWarnings = [...currentBootWarnings, msg];
+      },
+    });
+
+    // Simulate boot-time pin of a nonexistent spore (stale pin from file).
+    result.setActiveSpore('stale-boot-spore');
+    // Capture the boot-time warnings (index.ts does this after the boot setActiveSpore call).
+    bootTimeWarnings.push(...currentBootWarnings);
+
+    const bootWarningsCount = bootTimeWarnings.length;
+    expect(bootWarningsCount).toBeGreaterThan(0); // sanity: stale pin produces a warning
+
+    // Now simulate a fresh /spore pin for a valid spore.
+    currentBootWarnings = [...bootTimeWarnings];
+    result.setActiveSpore('secondary');
+    const warningsAfterPin = [...currentBootWarnings];
+
+    // The boot-time warning should still be present.
+    expect(warningsAfterPin.some((m) => m.includes('stale-boot-spore'))).toBe(true);
+    // The secondary spore has no unknown tools → no additional warnings.
+    expect(warningsAfterPin).toHaveLength(bootWarningsCount);
+
+    // Simulate unpin (reset to bootTimeWarnings).
+    currentBootWarnings = [...bootTimeWarnings];
+    const warningsAfterUnpin = [...currentBootWarnings];
+
+    // Boot-time warnings persist after unpin.
+    expect(warningsAfterUnpin.some((m) => m.includes('stale-boot-spore'))).toBe(true);
+    expect(warningsAfterUnpin).toHaveLength(bootWarningsCount);
+  });
 });

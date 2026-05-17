@@ -34,7 +34,7 @@ export interface McpLifecycleOpts {
   logsDir: string;
   /**
    * Timeout in ms for the MCP initialize handshake (§5.5).
-   * Defaults from MCP_INITIALIZE_TIMEOUT_MS env var, then 5000.
+   * Defaults from MCP_INITIALIZE_TIMEOUT_MS env var, then 30000.
    */
   initializeTimeoutMs?: number;
   /**
@@ -98,7 +98,7 @@ export class McpLifecycle {
   constructor(opts: McpLifecycleOpts) {
     this._opts = opts;
     this._initializeTimeoutMs =
-      opts.initializeTimeoutMs ?? (Number(process.env.MCP_INITIALIZE_TIMEOUT_MS) || 5000);
+      opts.initializeTimeoutMs ?? (Number(process.env.MCP_INITIALIZE_TIMEOUT_MS) || 30000);
     this._teardownGraceMs =
       opts.teardownGraceMs ?? (Number(process.env.MCP_TEARDOWN_GRACE_MS) || 2000);
     this._callTimeoutMs = opts.callTimeoutMs ?? (Number(process.env.MCP_CALL_TIMEOUT_MS) || 30000);

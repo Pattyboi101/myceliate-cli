@@ -100,7 +100,7 @@ export interface McpClientOpts {
   command: string;
   args: string[];
   env: Record<string, string>;
-  initializeTimeoutMs?: number; // default 5000 (env: MCP_INITIALIZE_TIMEOUT_MS)
+  initializeTimeoutMs?: number; // default 30000 (env: MCP_INITIALIZE_TIMEOUT_MS)
   callTimeoutMs?: number; // default 30000 (env: MCP_CALL_TIMEOUT_MS) — Promise.race in callTool guards the ReAct loop from hanging server I/O
   /** Optional name used in error messages; defaults to basename of command. */
   serverName?: string;
@@ -145,7 +145,7 @@ class McpClientImpl implements McpClient {
     const { command, serverName } = opts;
     this._serverName = serverName ?? command.split('/').at(-1) ?? command;
     this._initTimeoutMs =
-      opts.initializeTimeoutMs ?? (Number(process.env.MCP_INITIALIZE_TIMEOUT_MS) || 5000);
+      opts.initializeTimeoutMs ?? (Number(process.env.MCP_INITIALIZE_TIMEOUT_MS) || 30000);
     this._callTimeoutMs = opts.callTimeoutMs ?? (Number(process.env.MCP_CALL_TIMEOUT_MS) || 30000);
     this._logger = opts.logger;
   }

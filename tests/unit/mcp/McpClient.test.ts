@@ -165,17 +165,10 @@ describe('McpClient', () => {
   });
 
   describe('MCP_INITIALIZE_TIMEOUT_MS default', () => {
-    it('uses 30000ms as the hardcoded fallback when neither opt nor env var is set', () => {
-      // We cannot easily introspect _initTimeoutMs directly, so we verify the
-      // documented default via the env-var fallback path: a client created without
-      // initializeTimeoutMs and without MCP_INITIALIZE_TIMEOUT_MS set should
-      // produce a 30000ms timeout.  We do this by temporarily clearing the env
-      // var and confirming the client does NOT time out a server that responds
-      // in ~100ms (which would fail if the default were accidentally set to 0).
-      // The definitive assertion is the literal constant below.
-      const DEFAULT_INITIALIZE_TIMEOUT_MS = 30000;
-      expect(DEFAULT_INITIALIZE_TIMEOUT_MS).toBe(30000);
-    });
+    // Note: regression protection for the 30000ms default lives in source verification
+    // (three sites: McpClient.ts, mcpLifecycle.ts, mcpInstall.ts) rather than a unit test —
+    // observing the default value requires either spawning a slow fixture or exposing
+    // private state, neither of which is worth the test-machinery cost.
 
     it('respects MCP_INITIALIZE_TIMEOUT_MS env var override', () => {
       const original = process.env.MCP_INITIALIZE_TIMEOUT_MS;
@@ -186,7 +179,8 @@ describe('McpClient', () => {
       // client constructs without error
       expect(client).toBeDefined();
       if (original === undefined) {
-        process.env.MCP_INITIALIZE_TIMEOUT_MS = undefined;
+        // biome-ignore lint/performance/noDelete: process.env requires delete to fully remove the key; = undefined sets it to the string "undefined"
+        delete process.env.MCP_INITIALIZE_TIMEOUT_MS;
       } else {
         process.env.MCP_INITIALIZE_TIMEOUT_MS = original;
       }
